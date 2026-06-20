@@ -1,7 +1,11 @@
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
+  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,9 +18,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
   MessageCircle,
+  Paperclip,
   RefreshCw,
   Send,
   Users,
+  X,
 } from 'lucide-react-native';
 
 import {
@@ -27,6 +33,7 @@ import {
   markChatRead,
   sendChatMessage,
   subscribeToConversationMessages,
+  uploadChatAttachment,
   type ChatConversation,
   type ChatMessage,
   type ChatTarget,
@@ -38,16 +45,31 @@ type ChatScreenProps = {
   onBack: () => void;
 };
 
+const IMAGE_MIME_PREFIXES = ['image/'];
+
+function isImageUrl(body: string) {
+  if (!body.startsWith('http')) return false;
+  const lower = body.toLowerCase();
+  return (
+    lower.includes('.jpg') ||
+    lower.includes('.jpeg') ||
+    lower.includes('.png') ||
+    lower.includes('.gif') ||
+    lower.includes('.webp')
+  );
+}
+
+function parseAttachmentMessage(body: string): { name: string; url: string } | null {
+  const match = body.match(/^\[file:(.+?)\]\((.+?)\)$/);
+  if (match) return { name: match[1], url: match[2] };
+  const trimmed = body.trim();
+  if (isImageUrl(trimmed)) return { name: 'image', url: trimmed };
+  return null;
+}
+
 function getInitials(value: string) {
-  const words = value
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-
-  if (words.length === 0) {
-    return 'CP';
-  }
-
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 'CP';
   return words
     .slice(0, 2)
     .map((word) => word[0]?.toUpperCase() ?? '')
@@ -55,20 +77,13 @@ function getInitials(value: string) {
 }
 
 function shortRole(role: string) {
-  if (role === 'owner') {
-    return 'Owner';
-  }
-
-  if (role === 'admin') {
-    return 'Admin';
-  }
-
+  if (role === 'owner') return 'Owner';
+  if (role === 'admin') return 'Admin';
   return 'Member';
 }
 
 function formatReplyBody(message: ChatMessage, body: string) {
   const excerpt = message.body.replace(/\s+/g, ' ').trim().slice(0, 90);
-
   return `Replying to ${message.sender_name}: "${excerpt}"\n${body}`;
 }
 
@@ -81,6 +96,7 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
   const y = (value: number) => Math.round(value * heightScale);
   const s = (value: number) => Math.round(value * scale);
   const listRef = useRef<FlatList<ChatMessage>>(null);
+
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [targets, setTargets] = useState<ChatTarget[]>([]);
   const [selectedConversation, setSelectedConversation] =
@@ -93,56 +109,60 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
-  const swipeStartX = useRef(0);
-  const swipeStartY = useRef(0);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
-  const directConversationKeys = useMemo(() => {
+  // ── Dedup: track which profile IDs already have a DM conversation ─────────
+  const directConversationProfileIds = useMemo(() => {
     return new Set(
       conversations
-        .filter((conversation) => conversation.conversation_type === 'direct')
-        .map(
-          (conversation) =>
-            `${conversation.team_id}:${conversation.other_profile_id ?? ''}`,
-        ),
+        .filter((c) => c.conversation_type === 'direct' && c.other_profile_id)
+        .map((c) => c.other_profile_id ?? ''),
     );
   }, [conversations]);
 
   const teamConversations = useMemo(
-    () =>
-      conversations.filter(
-        (conversation) => conversation.conversation_type === 'team',
-      ),
+    () => conversations.filter((c) => c.conversation_type === 'team'),
     [conversations],
   );
 
-  const directConversations = useMemo(
-    () =>
-      conversations.filter(
-        (conversation) => conversation.conversation_type === 'direct',
-      ),
-    [conversations],
-  );
+  // Show only the most recent DM per person (no duplicate DMs from same user across teams)
+  const directConversations = useMemo(() => {
+    const seen = new Set<string>();
+    return conversations
+      .filter((c) => c.conversation_type === 'direct')
+      .sort((a, b) => {
+        if (!a.last_message_at && !b.last_message_at) return 0;
+        if (!a.last_message_at) return 1;
+        if (!b.last_message_at) return -1;
+        return (
+          new Date(b.last_message_at).getTime() -
+          new Date(a.last_message_at).getTime()
+        );
+      })
+      .filter((c) => {
+        const key = c.other_profile_id ?? c.conversation_id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [conversations]);
 
+  // Only show targets that don't already have a DM conversation (dedup by profile_id)
   const freshTargets = useMemo(
     () =>
       targets.filter(
-        (target) =>
-          !directConversationKeys.has(
-            `${target.team_id}:${target.profile_id}`,
-          ),
+        (target) => !directConversationProfileIds.has(target.profile_id),
       ),
-    [directConversationKeys, targets],
+    [directConversationProfileIds, targets],
   );
 
   const loadChatHome = useCallback(async () => {
     setError('');
-
     try {
       const [conversationRows, targetRows] = await Promise.all([
         listChatConversations(),
         listChatTargets(),
       ]);
-
       setConversations(conversationRows);
       setTargets(targetRows);
     } catch (loadError) {
@@ -153,37 +173,36 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
     }
   }, []);
 
-  const loadMessages = useCallback(async (conversation: ChatConversation) => {
-    setLoadingMessages(true);
-    setError('');
-
-    try {
-      const messageRows = await listChatMessages(conversation.conversation_id);
-      setMessages(messageRows);
-      await markChatRead(conversation.conversation_id);
-      void loadChatHome();
-
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: true });
-      });
-    } catch (loadError) {
-      setError(getErrorMessage(loadError));
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, [loadChatHome]);
+  const loadMessages = useCallback(
+    async (conversation: ChatConversation) => {
+      setLoadingMessages(true);
+      setError('');
+      try {
+        const messageRows = await listChatMessages(
+          conversation.conversation_id,
+        );
+        setMessages(messageRows);
+        await markChatRead(conversation.conversation_id);
+        void loadChatHome();
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToEnd({ animated: true });
+        });
+      } catch (loadError) {
+        setError(getErrorMessage(loadError));
+      } finally {
+        setLoadingMessages(false);
+      }
+    },
+    [loadChatHome],
+  );
 
   useEffect(() => {
     void loadChatHome();
   }, [loadChatHome]);
 
   useEffect(() => {
-    if (!selectedConversation) {
-      return undefined;
-    }
-
+    if (!selectedConversation) return undefined;
     void loadMessages(selectedConversation);
-
     return subscribeToConversationMessages(
       selectedConversation.conversation_id,
       () => {
@@ -192,25 +211,20 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
     );
   }, [loadMessages, selectedConversation]);
 
-  const openConversation = useCallback(
-    (conversation: ChatConversation) => {
-      setSelectedConversation(conversation);
-      setMessageText('');
-      setReplyToMessage(null);
-    },
-    [],
-  );
+  const openConversation = useCallback((conversation: ChatConversation) => {
+    setSelectedConversation(conversation);
+    setMessageText('');
+    setReplyToMessage(null);
+  }, []);
 
   const openDirectTarget = useCallback(
     async (target: ChatTarget) => {
       setError('');
-
       try {
         const conversation = await ensureDirectChat(
           target.team_id,
           target.profile_id,
         );
-
         const nextConversation: ChatConversation = {
           conversation_id: conversation.id,
           conversation_type: 'direct',
@@ -222,7 +236,6 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
           title: target.member_name,
           unread_count: 0,
         };
-
         setSelectedConversation(nextConversation);
         setMessageText('');
         setReplyToMessage(null);
@@ -234,51 +247,134 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
     [loadChatHome],
   );
 
-  const sendMessage = useCallback(async () => {
-    const body = messageText.trim();
-    const outgoingBody = replyToMessage
-      ? formatReplyBody(replyToMessage, body)
-      : body;
+  const sendMessage = useCallback(
+    async (overrideBody?: string) => {
+      const body = (overrideBody ?? messageText).trim();
+      const outgoingBody = replyToMessage
+        ? formatReplyBody(replyToMessage, body)
+        : body;
+      if (!selectedConversation || !body || sending) return;
 
-    if (!selectedConversation || !body || sending) {
-      return;
-    }
+      setSending(true);
+      if (!overrideBody) setMessageText('');
+      setError('');
 
-    setSending(true);
-    setMessageText('');
-    setError('');
+      try {
+        const sent = await sendChatMessage(
+          selectedConversation.conversation_id,
+          outgoingBody,
+        );
+        setReplyToMessage(null);
+        setMessages((current) => [
+          ...current,
+          {
+            body: sent.body,
+            conversation_id: sent.conversation_id,
+            created_at: sent.created_at,
+            is_mine: true,
+            message_id: sent.id,
+            sender_id: sent.sender_id,
+            sender_name: 'You',
+          },
+        ]);
+        void loadChatHome();
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToEnd({ animated: true });
+        });
+      } catch (sendError) {
+        if (!overrideBody) setMessageText(body);
+        setError(getErrorMessage(sendError));
+      } finally {
+        setSending(false);
+      }
+    },
+    [loadChatHome, messageText, replyToMessage, selectedConversation, sending],
+  );
 
-    try {
-      const sent = await sendChatMessage(
-        selectedConversation.conversation_id,
-        outgoingBody,
-      );
-      setReplyToMessage(null);
+  const handleAttach = useCallback(async () => {
+    if (!selectedConversation) return;
 
-      setMessages((current) => [
-        ...current,
-        {
-          body: sent.body,
-          conversation_id: sent.conversation_id,
-          created_at: sent.created_at,
-          is_mine: true,
-          message_id: sent.id,
-          sender_id: sent.sender_id,
-          sender_name: 'You',
+    Alert.alert('Add attachment', 'Choose what to share', [
+      {
+        text: 'Photo / Video',
+        onPress: async () => {
+          const perm =
+            await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (!perm.granted) {
+            Alert.alert(
+              'Permission needed',
+              'Allow media access to share photos.',
+            );
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            allowsEditing: false,
+            mediaTypes: ImagePicker.MediaTypeOptions.All,
+            quality: 0.8,
+          });
+          if (result.canceled || !result.assets[0]) return;
+
+          const asset = result.assets[0];
+          const mimeType =
+            asset.mimeType ??
+            (asset.uri.includes('.mp4') ? 'video/mp4' : 'image/jpeg');
+          const name = asset.fileName ?? `media-${Date.now()}.jpg`;
+
+          setUploadingAttachment(true);
+          setError('');
+          try {
+            const { publicUrl } = await uploadChatAttachment({
+              mimeType,
+              name,
+              uri: asset.uri,
+            });
+            const isImage = IMAGE_MIME_PREFIXES.some((p) =>
+              mimeType.startsWith(p),
+            );
+            const body = isImage
+              ? publicUrl
+              : `[file:${name}](${publicUrl})`;
+            await sendMessage(body);
+          } catch (err) {
+            setError(getErrorMessage(err));
+          } finally {
+            setUploadingAttachment(false);
+          }
         },
-      ]);
-      void loadChatHome();
+      },
+      {
+        text: 'File',
+        onPress: async () => {
+          const result = await DocumentPicker.getDocumentAsync({
+            copyToCacheDirectory: true,
+            type: '*/*',
+          });
+          if (result.canceled || !result.assets[0]) return;
 
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: true });
-      });
-    } catch (sendError) {
-      setMessageText(body);
-      setError(getErrorMessage(sendError));
-    } finally {
-      setSending(false);
-    }
-  }, [loadChatHome, messageText, replyToMessage, selectedConversation, sending]);
+          const asset = result.assets[0];
+          const mimeType = asset.mimeType ?? 'application/octet-stream';
+          const name = asset.name ?? `file-${Date.now()}`;
+
+          setUploadingAttachment(true);
+          setError('');
+          try {
+            const { publicUrl } = await uploadChatAttachment({
+              mimeType,
+              name,
+              uri: asset.uri,
+            });
+            const body = `[file:${name}](${publicUrl})`;
+            await sendMessage(body);
+          } catch (err) {
+            setError(getErrorMessage(err));
+          } finally {
+            setUploadingAttachment(false);
+          }
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }, [selectedConversation, sendMessage]);
 
   const closeRoom = useCallback(() => {
     setSelectedConversation(null);
@@ -337,11 +433,7 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View
-          style={{
-            alignItems: 'center',
-            flexDirection: 'row',
-            gap: x(8),
-          }}
+          style={{ alignItems: 'center', flexDirection: 'row', gap: x(8) }}
         >
           <Text
             numberOfLines={1}
@@ -390,11 +482,7 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
           }}
         >
           <Text
-            style={{
-              color: '#ffffff',
-              fontSize: s(12),
-              fontWeight: '800',
-            }}
+            style={{ color: '#ffffff', fontSize: s(12), fontWeight: '800' }}
           >
             {conversation.unread_count}
           </Text>
@@ -405,7 +493,7 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
 
   const renderTargetRow = (target: ChatTarget) => (
     <Pressable
-      key={`${target.team_id}:${target.profile_id}`}
+      key={`${target.profile_id}`}
       accessibilityRole="button"
       onPress={() => void openDirectTarget(target)}
       style={({ pressed }) => ({
@@ -430,11 +518,7 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
         }}
       >
         <Text
-          style={{
-            color: '#2f61d9',
-            fontSize: s(14),
-            fontWeight: '800',
-          }}
+          style={{ color: '#2f61d9', fontSize: s(14), fontWeight: '800' }}
         >
           {getInitials(target.member_name)}
         </Text>
@@ -442,11 +526,7 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
       <View style={{ flex: 1 }}>
         <Text
           numberOfLines={1}
-          style={{
-            color: palette.ink,
-            fontSize: s(16),
-            fontWeight: '700',
-          }}
+          style={{ color: palette.ink, fontSize: s(16), fontWeight: '700' }}
         >
           {target.member_name}
         </Text>
@@ -462,18 +542,17 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
           {shortRole(target.member_role)} in {target.team_name}
         </Text>
       </View>
-      <MessageCircle color={palette.greenDeep} size={s(19)} strokeWidth={2.4} />
+      <MessageCircle
+        color={palette.greenDeep}
+        size={s(19)}
+        strokeWidth={2.4}
+      />
     </Pressable>
   );
 
   const renderChatHome = () => (
     <View style={{ flex: 1 }}>
-      <View
-        style={{
-          paddingHorizontal: x(38),
-          paddingTop: y(54),
-        }}
-      >
+      <View style={{ paddingHorizontal: x(38), paddingTop: y(54) }}>
         <Pressable
           accessibilityRole="button"
           onPress={onBack}
@@ -587,7 +666,8 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
             <SectionHeader label="Direct messages" s={s} y={y} />
             {directConversations.map(renderConversationRow)}
             {freshTargets.map(renderTargetRow)}
-            {directConversations.length === 0 && freshTargets.length === 0 ? (
+            {directConversations.length === 0 &&
+            freshTargets.length === 0 ? (
               <EmptyChatCopy
                 body="Admins and members you can message will appear here."
                 s={s}
@@ -600,315 +680,318 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
     </View>
   );
 
-  const renderMessage = ({ item }: { item: ChatMessage }) => (
-    <View
-      style={{
-        alignItems: item.is_mine ? 'flex-end' : 'flex-start',
-        marginBottom: y(10),
-      }}
-    >
-      {!item.is_mine ? (
-        <Text
-          style={{
-            color: '#858895',
-            fontSize: s(12),
-            fontWeight: '600',
-            marginBottom: y(5),
-            marginLeft: x(4),
-          }}
-        >
-          {item.sender_name}
-        </Text>
-      ) : null}
-      <View
-        onResponderGrant={(event) => {
-          swipeStartX.current = event.nativeEvent.pageX;
-          swipeStartY.current = event.nativeEvent.pageY;
-        }}
-        onResponderRelease={(event) => {
-          const deltaX = event.nativeEvent.pageX - swipeStartX.current;
-          const deltaY = event.nativeEvent.pageY - swipeStartY.current;
-
-          if (deltaX < -42 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15) {
-            setReplyToMessage(item);
-          }
-        }}
-        onStartShouldSetResponder={() => true}
-        style={{
-          backgroundColor: item.is_mine ? '#2f7df6' : '#fff4f0',
-          borderBottomLeftRadius: item.is_mine ? s(22) : s(8),
-          borderBottomRightRadius: item.is_mine ? s(8) : s(22),
-          borderTopLeftRadius: s(22),
-          borderTopRightRadius: s(22),
-          maxWidth: '82%',
-          paddingHorizontal: x(20),
-          paddingVertical: y(14),
-        }}
-      >
-        <Text
-          style={{
-            color: item.is_mine ? '#ffffff' : '#262633',
-            fontSize: s(18),
-            fontWeight: '500',
-            lineHeight: s(27),
-          }}
-        >
-          {item.body}
-        </Text>
-      </View>
-    </View>
-  );
-
-  const renderChatRoom = () => {
-    if (!selectedConversation) {
-      return null;
-    }
+  const renderMessageItem = ({ item }: { item: ChatMessage }) => {
+    const attachment = parseAttachmentMessage(item.body);
 
     return (
-      <View style={{ flex: 1 }}>
+      <Pressable
+        onLongPress={() => setReplyToMessage(item)}
+        style={{
+          alignItems: item.is_mine ? 'flex-end' : 'flex-start',
+          marginBottom: y(12),
+          paddingHorizontal: x(20),
+        }}
+      >
+        {!item.is_mine ? (
+          <Text
+            style={{
+              color: '#8a90a3',
+              fontSize: s(12),
+              fontWeight: '600',
+              marginBottom: y(4),
+            }}
+          >
+            {item.sender_name}
+          </Text>
+        ) : null}
+        <View
+          style={{
+            backgroundColor: item.is_mine ? '#2f7df6' : '#f0f2f8',
+            borderBottomLeftRadius: item.is_mine ? s(18) : s(4),
+            borderBottomRightRadius: item.is_mine ? s(4) : s(18),
+            borderTopLeftRadius: s(18),
+            borderTopRightRadius: s(18),
+            maxWidth: '78%',
+            overflow: 'hidden',
+            paddingHorizontal:
+              attachment?.name === 'image' ? 0 : x(14),
+            paddingVertical: attachment?.name === 'image' ? 0 : y(10),
+          }}
+        >
+          {attachment ? (
+            attachment.name === 'image' || isImageUrl(attachment.url) ? (
+              <Image
+                resizeMode="cover"
+                source={{ uri: attachment.url }}
+                style={{
+                  borderRadius: s(18),
+                  height: s(180),
+                  width: s(220),
+                }}
+              />
+            ) : (
+              <View
+                style={{
+                  alignItems: 'center',
+                  flexDirection: 'row',
+                  gap: x(8),
+                }}
+              >
+                <Text style={{ fontSize: s(20) }}>📎</Text>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: item.is_mine ? '#ffffff' : palette.ink,
+                    fontSize: s(14),
+                    fontWeight: '600',
+                    maxWidth: s(160),
+                    textDecorationLine: 'underline',
+                  }}
+                >
+                  {attachment.name}
+                </Text>
+              </View>
+            )
+          ) : (
+            <Text
+              selectable
+              style={{
+                color: item.is_mine ? '#ffffff' : '#22242e',
+                fontSize: Math.max(s(16), 14),
+                fontWeight: '500',
+                lineHeight: Math.max(s(22), 20),
+              }}
+            >
+              {item.body}
+            </Text>
+          )}
+        </View>
+        <Text
+          style={{
+            color: '#a5a7a0',
+            fontSize: s(11),
+            fontWeight: '500',
+            marginTop: y(4),
+          }}
+        >
+          {formatRequestTime(item.created_at)}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const renderChatRoom = () => (
+    <View style={{ flex: 1 }}>
+      <View
+        style={{
+          alignItems: 'center',
+          backgroundColor: '#ffffff',
+          borderBottomColor: '#edf0f5',
+          borderBottomWidth: 1,
+          flexDirection: 'row',
+          gap: x(14),
+          paddingBottom: y(14),
+          paddingHorizontal: x(20),
+          paddingTop: y(54),
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          onPress={closeRoom}
+          style={({ pressed }) => ({
+            alignItems: 'center',
+            backgroundColor: pressed ? '#f0f2f6' : '#f5f6fa',
+            borderRadius: s(16),
+            height: s(44),
+            justifyContent: 'center',
+            width: s(44),
+          })}
+        >
+          <ChevronLeft color="#8a90a3" size={s(22)} strokeWidth={3} />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              color: '#22242e',
+              fontSize: s(18),
+              fontWeight: '800',
+            }}
+          >
+            {selectedConversation?.title}
+          </Text>
+          {selectedConversation?.subtitle ? (
+            <Text
+              numberOfLines={1}
+              style={{
+                color: '#8a90a3',
+                fontSize: s(13),
+                fontWeight: '500',
+                marginTop: y(2),
+              }}
+            >
+              {selectedConversation.subtitle}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      {loadingMessages ? (
+        <View
+          style={{ alignItems: 'center', flex: 1, justifyContent: 'center' }}
+        >
+          <ActivityIndicator color={palette.greenDeep} size="large" />
+        </View>
+      ) : (
+        <FlatList
+          ref={listRef}
+          contentContainerStyle={{
+            paddingBottom: y(16),
+            paddingTop: y(16),
+          }}
+          data={messages}
+          keyExtractor={(item) => item.message_id}
+          onContentSizeChange={() =>
+            listRef.current?.scrollToEnd({ animated: false })
+          }
+          renderItem={renderMessageItem}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
+
+      <View
+        style={{
+          backgroundColor: '#ffffff',
+          borderTopColor: '#edf0f5',
+          borderTopWidth: 1,
+          paddingBottom: y(24),
+          paddingHorizontal: x(16),
+          paddingTop: y(12),
+        }}
+      >
+        {error ? <InlineError error={error} s={s} x={x} y={y} /> : null}
+
+        {replyToMessage ? (
           <View
             style={{
               alignItems: 'center',
+              backgroundColor: '#f3f5fb',
+              borderRadius: s(12),
               flexDirection: 'row',
-              gap: x(14),
-              paddingHorizontal: x(38),
-              paddingTop: y(54),
+              gap: x(10),
+              marginBottom: y(10),
+              paddingHorizontal: x(14),
+              paddingVertical: y(8),
             }}
           >
-            <Pressable
-              accessibilityRole="button"
-              onPress={closeRoom}
-              style={({ pressed }) => ({
-                alignItems: 'center',
-                backgroundColor: '#ffffff',
-                borderColor: '#edf0f5',
-                borderRadius: s(18),
-                borderWidth: 1,
-                height: s(56),
-                justifyContent: 'center',
-                opacity: pressed ? 0.72 : 1,
-                shadowColor: '#0a1530',
-                shadowOffset: { height: 8, width: 0 },
-                shadowOpacity: 0.08,
-                shadowRadius: 16,
-                width: s(56),
-              })}
-            >
-              <ChevronLeft color="#8a90a3" size={s(26)} strokeWidth={3} />
-            </Pressable>
             <View style={{ flex: 1 }}>
               <Text
-                numberOfLines={1}
                 style={{
-                  color: palette.ink,
-                  fontSize: s(22),
+                  color: '#2f7df6',
+                  fontSize: s(13),
                   fontWeight: '800',
-                  letterSpacing: -0.4,
                 }}
               >
-                {selectedConversation.title}
+                Replying to {replyToMessage.sender_name}
               </Text>
               <Text
                 numberOfLines={1}
                 style={{
-                  color: '#757989',
-                  fontSize: s(15),
+                  color: '#22242e',
+                  fontSize: s(13),
                   fontWeight: '500',
                   marginTop: y(2),
                 }}
               >
-                {selectedConversation.conversation_type === 'team'
-                  ? 'Team chat'
-                  : selectedConversation.subtitle}
+                {replyToMessage.body}
               </Text>
             </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setReplyToMessage(null)}
+              style={({ pressed }) => ({
+                alignItems: 'center',
+                height: s(34),
+                justifyContent: 'center',
+                opacity: pressed ? 0.58 : 1,
+                width: s(34),
+              })}
+            >
+              <X color="#8a90a3" size={s(18)} strokeWidth={2.5} />
+            </Pressable>
           </View>
+        ) : null}
 
-          {error ? (
-            <View style={{ paddingHorizontal: x(38), paddingTop: y(14) }}>
-              <InlineError error={error} s={s} x={x} y={y} />
-            </View>
-          ) : null}
+        <View
+          style={{ alignItems: 'center', flexDirection: 'row', gap: x(8) }}
+        >
+          <Pressable
+            accessibilityRole="button"
+            disabled={uploadingAttachment || sending}
+            onPress={() => void handleAttach()}
+            style={({ pressed }) => ({
+              alignItems: 'center',
+              backgroundColor: pressed ? '#e8eaf0' : '#f0f2f8',
+              borderRadius: 999,
+              height: s(46),
+              justifyContent: 'center',
+              opacity: uploadingAttachment ? 0.5 : 1,
+              width: s(46),
+            })}
+          >
+            {uploadingAttachment ? (
+              <ActivityIndicator color={palette.greenDeep} size="small" />
+            ) : (
+              <Paperclip color="#8a90a3" size={s(20)} strokeWidth={2.4} />
+            )}
+          </Pressable>
 
-          <FlatList
-            ref={listRef}
-            contentContainerStyle={{
-              flexGrow: 1,
-              justifyContent:
-                messages.length === 0 && !loadingMessages
-                  ? 'center'
-                  : 'flex-end',
-              paddingBottom: y(22),
-              paddingHorizontal: x(54),
-              paddingTop: y(44),
+          <TextInput
+            onChangeText={setMessageText}
+            onSubmitEditing={() => void sendMessage()}
+            placeholder="My message"
+            placeholderTextColor="#a1a6b6"
+            returnKeyType="send"
+            style={{
+              borderColor: '#dbe1f0',
+              borderRadius: s(22),
+              borderWidth: 1,
+              color: palette.ink,
+              flex: 1,
+              fontSize: Math.max(s(18), 16),
+              fontWeight: '500',
+              lineHeight: Math.max(s(24), 22),
+              minHeight: y(58),
+              paddingHorizontal: x(22),
+              paddingVertical: y(12),
             }}
-            data={messages}
-            keyExtractor={(item) => item.message_id}
-            keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={
-              loadingMessages ? (
-                <ActivityIndicator color={palette.greenDeep} size="large" />
-              ) : (
-                <View style={{ alignItems: 'center', paddingHorizontal: x(20) }}>
-                  <MessageCircle
-                    color="#c7cad2"
-                    size={s(42)}
-                    strokeWidth={2.2}
-                  />
-                  <Text
-                    style={{
-                      color: '#22242e',
-                      fontSize: s(19),
-                      fontWeight: '700',
-                      marginTop: y(14),
-                      textAlign: 'center',
-                    }}
-                  >
-                    No messages yet
-                  </Text>
-                  <Text
-                    style={{
-                      color: '#a2a5ad',
-                      fontSize: s(15),
-                      fontWeight: '500',
-                      lineHeight: s(22),
-                      marginTop: y(6),
-                      textAlign: 'center',
-                    }}
-                  >
-                    Send the first message and keep the team aligned.
-                  </Text>
-                </View>
-              )
-            }
-            onContentSizeChange={() => {
-              listRef.current?.scrollToEnd({ animated: true });
-            }}
-            renderItem={renderMessage}
-            showsVerticalScrollIndicator={false}
+            value={messageText}
           />
 
-          <View
-            style={{
-              paddingBottom: y(32),
-              paddingHorizontal: x(42),
-              paddingTop: y(10),
-            }}
+          <Pressable
+            accessibilityRole="button"
+            disabled={!messageText.trim() || sending}
+            onPress={() => void sendMessage()}
+            style={({ pressed }) => ({
+              alignItems: 'center',
+              backgroundColor: messageText.trim() ? '#2f7df6' : '#d9dde7',
+              borderRadius: 999,
+              height: s(52),
+              justifyContent: 'center',
+              opacity: pressed ? 0.78 : 1,
+              width: s(52),
+            })}
           >
-            {replyToMessage ? (
-              <View
-                style={{
-                  alignItems: 'center',
-                  backgroundColor: '#f4f6fb',
-                  borderColor: '#e1e6f3',
-                  borderRadius: s(18),
-                  borderWidth: 1,
-                  flexDirection: 'row',
-                  marginBottom: y(9),
-                  paddingHorizontal: x(14),
-                  paddingVertical: y(9),
-                }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      color: '#5f6f91',
-                      fontSize: s(12),
-                      fontWeight: '800',
-                    }}
-                  >
-                    Replying to {replyToMessage.sender_name}
-                  </Text>
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      color: '#22242e',
-                      fontSize: s(13),
-                      fontWeight: '500',
-                      marginTop: y(2),
-                    }}
-                  >
-                    {replyToMessage.body}
-                  </Text>
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setReplyToMessage(null)}
-                  style={({ pressed }) => ({
-                    alignItems: 'center',
-                    height: s(34),
-                    justifyContent: 'center',
-                    opacity: pressed ? 0.58 : 1,
-                    width: s(34),
-                  })}
-                >
-                  <Text
-                    style={{
-                      color: '#8a90a3',
-                      fontSize: Math.max(s(22), 18),
-                      fontWeight: '700',
-                      lineHeight: s(24),
-                    }}
-                  >
-                    ×
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
-            <View
-              style={{
-                alignItems: 'center',
-                flexDirection: 'row',
-                gap: x(10),
-              }}
-            >
-              <TextInput
-                onChangeText={setMessageText}
-                onSubmitEditing={() => void sendMessage()}
-                placeholder="My message"
-                placeholderTextColor="#a1a6b6"
-                returnKeyType="send"
-                style={{
-                  borderColor: '#dbe1f0',
-                  borderRadius: s(22),
-                  borderWidth: 1,
-                  color: palette.ink,
-                  flex: 1,
-                  fontSize: Math.max(s(18), 16),
-                  fontWeight: '500',
-                  lineHeight: Math.max(s(24), 22),
-                  minHeight: y(58),
-                  paddingHorizontal: x(22),
-                  paddingVertical: y(12),
-                }}
-                value={messageText}
-              />
-              <Pressable
-                accessibilityRole="button"
-                disabled={!messageText.trim() || sending}
-                onPress={() => void sendMessage()}
-                style={({ pressed }) => ({
-                  alignItems: 'center',
-                  backgroundColor: messageText.trim() ? '#2f7df6' : '#d9dde7',
-                  borderRadius: 999,
-                  height: s(52),
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.78 : 1,
-                  width: s(52),
-                })}
-              >
-                {sending ? (
-                  <ActivityIndicator color="#ffffff" size="small" />
-                ) : (
-                  <Send color="#ffffff" size={s(20)} strokeWidth={2.6} />
-                )}
-              </Pressable>
-            </View>
-          </View>
+            {sending ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : (
+              <Send color="#ffffff" size={s(20)} strokeWidth={2.6} />
+            )}
+          </Pressable>
+        </View>
       </View>
-    );
-  };
+    </View>
+  );
 
   return (
     <View style={{ backgroundColor: '#ffffff', flex: 1 }}>
@@ -924,8 +1007,8 @@ function SectionHeader({
   y,
 }: {
   label: string;
-  s: (value: number) => number;
-  y: (value: number) => number;
+  s: (v: number) => number;
+  y: (v: number) => number;
 }) {
   return (
     <Text
@@ -951,9 +1034,9 @@ function InlineError({
   y,
 }: {
   error: string;
-  s: (value: number) => number;
-  x: (value: number) => number;
-  y: (value: number) => number;
+  s: (v: number) => number;
+  x: (v: number) => number;
+  y: (v: number) => number;
 }) {
   return (
     <View
@@ -967,13 +1050,7 @@ function InlineError({
         paddingVertical: y(12),
       }}
     >
-      <Text
-        style={{
-          color: '#a12d1c',
-          fontSize: s(14),
-          fontWeight: '600',
-        }}
-      >
+      <Text style={{ color: '#a12d1c', fontSize: s(14), fontWeight: '600' }}>
         {error}
       </Text>
     </View>
@@ -986,8 +1063,8 @@ function EmptyChatCopy({
   y,
 }: {
   body: string;
-  s: (value: number) => number;
-  y: (value: number) => number;
+  s: (v: number) => number;
+  y: (v: number) => number;
 }) {
   return (
     <View

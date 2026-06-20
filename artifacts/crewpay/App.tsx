@@ -183,6 +183,7 @@ import {
   ArrowLeftRight,
   Bell,
   Check,
+  ChevronRight,
   CircleCheck,
   CircleX,
   ClipboardCheck,
@@ -206,6 +207,7 @@ import {
 import type { ReactNode, RefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   AppState,
@@ -1631,6 +1633,7 @@ export default function App() {
             onCreateTask={() => setScreen('create-task')}
             onJoinTeam={() => setScreen('join-team')}
             onOpenChat={() => setScreen('chat')}
+            onOpenPayoutHistory={() => setScreen('payout-history')}
             onOpenNotifications={() => {
               setScreen('notifications');
               refreshAppNotifications();
@@ -1965,6 +1968,22 @@ export default function App() {
         >
           <BulkTransferScreen
             teams={visibleTeams}
+            onBack={() => setScreen('home')}
+          />
+        </View>
+      ) : null}
+      {screen === 'payout-history' ? (
+        <View
+          style={{
+            bottom: 0,
+            left: 0,
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            zIndex: 10,
+          }}
+        >
+          <PayoutHistoryScreen
             onBack={() => setScreen('home')}
           />
         </View>
@@ -7058,6 +7077,7 @@ function HomeScreen({
   onLogout,
   onOpenChat,
   onOpenNotifications,
+  onOpenPayoutHistory,
   onOpenRequests,
   onOpenSubmissions,
   onRetrySync,
@@ -7076,6 +7096,7 @@ function HomeScreen({
   onCreateTask: () => void;
   onJoinTeam: () => void;
   onLogout: () => void;
+  onOpenPayoutHistory: () => void;
   onOpenChat: () => void;
   onOpenNotifications: () => void;
   onOpenRequests: () => void;
@@ -7972,6 +7993,175 @@ function HomeScreen({
         </Animated.View>
       ) : null}
 
+      {activeTab === 'activity' ? (
+        <View
+          style={{
+            backgroundColor: palette.paper,
+            bottom: y(114),
+            left: 0,
+            position: 'absolute',
+            right: 0,
+            top: 0,
+          }}
+        >
+          <ScrollView
+            contentContainerStyle={{
+              paddingBottom: y(40),
+              paddingHorizontal: x(24),
+              paddingTop: y(52),
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text
+              selectable
+              style={{
+                color: palette.ink,
+                fontSize: s(28),
+                fontWeight: '900',
+                letterSpacing: -0.7,
+                lineHeight: s(34),
+              }}
+            >
+              Activity
+            </Text>
+            <Text
+              selectable
+              style={{
+                color: '#747a70',
+                fontSize: s(14),
+                fontWeight: '500',
+                lineHeight: s(20),
+                marginTop: y(5),
+              }}
+            >
+              {isCrewMate ? 'Your recent task submissions and team updates.' : 'Payouts, wallet activity, and team messages.'}
+            </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={onOpenChat}
+              style={({ pressed }) => ({
+                alignItems: 'center',
+                backgroundColor: pressed ? '#e8ead3' : palette.green,
+                borderRadius: s(18),
+                flexDirection: 'row',
+                gap: x(12),
+                marginTop: y(22),
+                paddingHorizontal: x(16),
+                paddingVertical: y(14),
+              })}
+            >
+              <View style={{ alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 999, height: s(36), justifyContent: 'center', width: s(36) }}>
+                <Text style={{ fontSize: s(18) }}>💬</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text selectable style={{ color: palette.ink, fontSize: s(16), fontWeight: '900' }}>Open chats</Text>
+                <Text selectable style={{ color: '#5a5f54', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>Team rooms and direct messages</Text>
+              </View>
+              <ChevronRight color={palette.ink} size={s(18)} strokeWidth={2.5} />
+            </Pressable>
+
+            {!isCrewMate ? (
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onOpenPayoutHistory}
+                  style={({ pressed }) => ({
+                    alignItems: 'center',
+                    backgroundColor: pressed ? '#f0f1ea' : '#f5f6f0',
+                    borderColor: '#e2e4db',
+                    borderRadius: s(18),
+                    borderWidth: 1,
+                    flexDirection: 'row',
+                    gap: x(12),
+                    marginTop: y(12),
+                    paddingHorizontal: x(16),
+                    paddingVertical: y(14),
+                  })}
+                >
+                  <View style={{ alignItems: 'center', backgroundColor: palette.ink, borderRadius: 999, height: s(36), justifyContent: 'center', width: s(36) }}>
+                    <Text style={{ fontSize: s(18) }}>₦</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text selectable style={{ color: palette.ink, fontSize: s(16), fontWeight: '900' }}>Payout history</Text>
+                    <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>All wallet transactions and payout records</Text>
+                  </View>
+                  <ChevronRight color="#a0a59d" size={s(18)} strokeWidth={2.5} />
+                </Pressable>
+
+                {walletTransactions.length > 0 ? (
+                  <View style={{ gap: y(8), marginTop: y(20) }}>
+                    <Text selectable style={{ color: '#a0a59d', fontSize: s(12), fontWeight: '800', letterSpacing: 0.3, textTransform: 'uppercase' }}>
+                      Recent payouts
+                    </Text>
+                    {walletTransactions
+                      .filter((t) => t.direction === 'reserve' || t.direction === 'debit')
+                      .slice(0, 5)
+                      .map((t) => (
+                        <View
+                          key={t.id}
+                          style={{
+                            backgroundColor: '#f8f9f3',
+                            borderColor: '#eceee7',
+                            borderRadius: s(14),
+                            borderWidth: 1,
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            paddingHorizontal: x(14),
+                            paddingVertical: y(12),
+                          }}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text selectable style={{ color: palette.ink, fontSize: s(14), fontWeight: '800' }}>{t.title}</Text>
+                            <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>{t.subtitle}</Text>
+                          </View>
+                          <Text selectable style={{ color: '#e05252', fontSize: s(14), fontWeight: '900' }}>
+                            -{'\u20a6'}{Number(t.amountNaira || 0).toLocaleString()}
+                          </Text>
+                        </View>
+                      ))}
+                  </View>
+                ) : walletLoading ? (
+                  <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
+                    <ActivityIndicator color={palette.greenDeep} />
+                  </View>
+                ) : (
+                  <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
+                    <Text selectable style={{ color: '#a0a59d', fontSize: s(14), fontWeight: '600', textAlign: 'center' }}>No payouts yet. Process your first bulk transfer.</Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                onPress={onOpenSubmissions}
+                style={({ pressed }) => ({
+                  alignItems: 'center',
+                  backgroundColor: pressed ? '#f0f1ea' : '#f5f6f0',
+                  borderColor: '#e2e4db',
+                  borderRadius: s(18),
+                  borderWidth: 1,
+                  flexDirection: 'row',
+                  gap: x(12),
+                  marginTop: y(12),
+                  paddingHorizontal: x(16),
+                  paddingVertical: y(14),
+                })}
+              >
+                <View style={{ alignItems: 'center', backgroundColor: palette.green, borderRadius: 999, height: s(36), justifyContent: 'center', width: s(36) }}>
+                  <Text style={{ fontSize: s(18) }}>📋</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text selectable style={{ color: palette.ink, fontSize: s(16), fontWeight: '900' }}>My submissions</Text>
+                  <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>View your submitted work and approval status</Text>
+                </View>
+                <ChevronRight color="#a0a59d" size={s(18)} strokeWidth={2.5} />
+              </Pressable>
+            )}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {activeTab === 'settings' ? (
         <HomeSettingsPanel
           email={email}
@@ -8027,10 +8217,7 @@ function HomeScreen({
             <HomeTabButton
               active={activeTab === 'activity'}
               icon="activity"
-              onPress={() => {
-                setActiveTab('activity');
-                onOpenChat();
-              }}
+              onPress={() => setActiveTab('activity')}
               scale={scale}
             />
             <HomeTabButton
@@ -18902,6 +19089,244 @@ function ChevronDownIcon({ scale }: { scale: number }) {
           width: sFor(scale, 13),
         }}
       />
+    </View>
+  );
+}
+
+function PayoutHistoryScreen({ onBack }: { onBack: () => void }) {
+  const { width, height } = useWindowDimensions();
+  const widthScale = width / 624;
+  const heightScale = height / 1239;
+  const scale = Math.min(widthScale, heightScale);
+  const x = (value: number) => Math.round(value * widthScale);
+  const y = (value: number) => Math.round(value * heightScale);
+  const s = (value: number) => Math.round(value * scale);
+
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    void (async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const rows = await listWalletTransactions();
+        setTransactions(rows.filter((t) => t.direction === 'reserve' || t.direction === 'debit'));
+      } catch (err) {
+        setError(getErrorMessage(err));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const directionLabel = (dir: string) => {
+    if (dir === 'reserve') return 'Reserved';
+    if (dir === 'debit') return 'Paid out';
+    return dir;
+  };
+
+  const directionColor = (dir: string) => {
+    if (dir === 'reserve') return '#f0a532';
+    if (dir === 'debit') return '#e05252';
+    return '#22242e';
+  };
+
+  return (
+    <View
+      style={{
+        backgroundColor: '#ffffff',
+        flex: 1,
+      }}
+    >
+      <StatusBar style="dark" />
+      <View
+        style={{
+          paddingHorizontal: x(38),
+          paddingTop: y(54),
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          onPress={onBack}
+          style={({ pressed }) => ({
+            alignItems: 'center',
+            backgroundColor: '#f3f4ef',
+            borderRadius: 999,
+            height: s(58),
+            justifyContent: 'center',
+            opacity: pressed ? 0.55 : 1,
+            width: s(58),
+          })}
+        >
+          <ArrowLeftIcon scale={s(1) * 0.78} />
+        </Pressable>
+        <Text
+          style={{
+            color: '#22242e',
+            fontSize: s(32),
+            fontWeight: '900',
+            letterSpacing: -0.8,
+            marginTop: y(36),
+          }}
+        >
+          Payout History
+        </Text>
+        <Text
+          style={{
+            color: '#777a83',
+            fontSize: s(16),
+            fontWeight: '500',
+            lineHeight: s(23),
+            marginTop: y(8),
+          }}
+        >
+          All reserved and completed payouts from your wallet.
+        </Text>
+      </View>
+
+      {loading ? (
+        <View
+          style={{ alignItems: 'center', flex: 1, justifyContent: 'center' }}
+        >
+          <ActivityIndicator color={palette.greenDeep} size="large" />
+        </View>
+      ) : error ? (
+        <View
+          style={{
+            backgroundColor: '#fff0ed',
+            borderColor: '#ffd3ca',
+            borderRadius: s(18),
+            borderWidth: 1,
+            marginHorizontal: x(38),
+            marginTop: y(24),
+            paddingHorizontal: x(16),
+            paddingVertical: y(12),
+          }}
+        >
+          <Text
+            style={{ color: '#a12d1c', fontSize: s(14), fontWeight: '600' }}
+          >
+            {error}
+          </Text>
+        </View>
+      ) : transactions.length === 0 ? (
+        <View
+          style={{ alignItems: 'center', flex: 1, justifyContent: 'center' }}
+        >
+          <Text
+            style={{
+              color: '#a0a3ac',
+              fontSize: s(17),
+              fontWeight: '600',
+              paddingHorizontal: x(48),
+              textAlign: 'center',
+            }}
+          >
+            No payouts yet. Process your first bulk transfer to see records here.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          contentContainerStyle={{
+            paddingBottom: y(60),
+            paddingHorizontal: x(38),
+            paddingTop: y(32),
+          }}
+          data={transactions}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <View
+              style={{
+                backgroundColor: '#f8f9f3',
+                borderColor: '#eceee7',
+                borderRadius: s(18),
+                borderWidth: 1,
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                marginBottom: y(12),
+                paddingHorizontal: x(18),
+                paddingVertical: y(16),
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    color: '#22242e',
+                    fontSize: s(16),
+                    fontWeight: '800',
+                  }}
+                >
+                  {item.title}
+                </Text>
+                {item.subtitle ? (
+                  <Text
+                    style={{
+                      color: '#747a70',
+                      fontSize: s(13),
+                      fontWeight: '500',
+                      marginTop: y(3),
+                    }}
+                  >
+                    {item.subtitle}
+                  </Text>
+                ) : null}
+                <View
+                  style={{
+                    alignItems: 'center',
+                    flexDirection: 'row',
+                    gap: x(8),
+                    marginTop: y(8),
+                  }}
+                >
+                  <View
+                    style={{
+                      backgroundColor:
+                        item.direction === 'reserve' ? '#fff4d4' : '#ffe8e8',
+                      borderRadius: s(8),
+                      paddingHorizontal: x(8),
+                      paddingVertical: y(3),
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: directionColor(item.direction),
+                        fontSize: s(11),
+                        fontWeight: '800',
+                        letterSpacing: 0.2,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {directionLabel(item.direction)}
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      color: '#a0a59d',
+                      fontSize: s(12),
+                      fontWeight: '500',
+                    }}
+                  >
+                    {formatRequestTime(item.createdAt)}
+                  </Text>
+                </View>
+              </View>
+              <Text
+                style={{
+                  color: directionColor(item.direction),
+                  fontSize: s(18),
+                  fontWeight: '900',
+                }}
+              >
+                -{'\u20a6'}
+                {Number(item.amountNaira || 0).toLocaleString()}
+              </Text>
+            </View>
+          )}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </View>
   );
 }

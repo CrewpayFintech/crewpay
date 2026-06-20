@@ -179,6 +179,43 @@ export async function sendChatMessage(
   return result.data as SentChatMessage;
 }
 
+export async function uploadChatAttachment(input: {
+  mimeType: string;
+  name: string;
+  uri: string;
+}): Promise<{ publicUrl: string; storagePath: string }> {
+  const user = await ensureAuthenticatedUser();
+  const response = await fetch(input.uri);
+
+  if (!response.ok) {
+    throw new Error('Could not read selected file.');
+  }
+
+  const body = await response.arrayBuffer();
+  const safeName = input.name
+    .trim()
+    .replace(/[^A-Za-z0-9._-]/g, '-')
+    .replace(/-+/g, '-') || 'attachment';
+  const storagePath = `${user.id}/chat/${Date.now()}-${safeName}`;
+
+  const upload = await supabase.storage
+    .from('chat-media')
+    .upload(storagePath, body, {
+      contentType: input.mimeType || 'application/octet-stream',
+      upsert: false,
+    });
+
+  if (upload.error) {
+    throw new Error(upload.error.message);
+  }
+
+  const { data: urlData } = supabase.storage
+    .from('chat-media')
+    .getPublicUrl(storagePath);
+
+  return { publicUrl: urlData.publicUrl, storagePath };
+}
+
 export function subscribeToConversationMessages(
   conversationId: string,
   onMessage: () => void,

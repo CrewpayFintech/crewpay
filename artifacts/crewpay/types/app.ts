@@ -32,7 +32,8 @@ export type AppScreen =
   | 'submit-proof'
   | 'view-task'
   | 'view-team'
-  | 'bulk-transfer';
+  | 'bulk-transfer'
+  | 'payout-history';
 
 export type EmailStep = 'entry' | 'otp';
 export type AccountIntroSource = 'onboarding' | 'email';
