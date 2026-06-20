@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "CrewPay",
+    "owner": "iluyomade",
+    "slug": "crewpay",
+    "scheme": "crewpay",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.iluyomade.crewpay",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "7d915933-4663-43de-b1db-708d60bad41f"
+      }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

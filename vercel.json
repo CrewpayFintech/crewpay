@@ -1,0 +1,13 @@
+{
+  "buildCommand": "npm run build",
+  "cleanUrls": true,
+  "framework": null,
+  "installCommand": "npm install",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/:path*",
+      "destination": "/"
+    }
+  ]
+}
