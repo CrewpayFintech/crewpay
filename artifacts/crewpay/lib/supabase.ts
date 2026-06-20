@@ -1,7 +1,18 @@
 import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
+
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing Supabase environment variables.');
+}
 
 function toSecureStoreKey(key: string) {
   return key.replace(/[^A-Za-z0-9._-]/g, (character) => {
@@ -29,36 +40,11 @@ const supabaseSecureStorage = {
   },
 };
 
-let _supabase: SupabaseClient | null = null;
-
-export function getSupabase(): SupabaseClient {
-  if (_supabase) return _supabase;
-
-  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      'Supabase is not configured. Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your environment secrets.',
-    );
-  }
-
-  _supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: true,
-      detectSessionInUrl: false,
-      persistSession: true,
-      storage: supabaseSecureStorage,
-    },
-  });
-
-  return _supabase;
-}
-
-// Convenience proxy that lets existing code use `supabase.from(...)` etc.
-// It throws a helpful error if Supabase isn't configured yet.
-export const supabase = new Proxy({} as SupabaseClient, {
-  get(_target, prop) {
-    return (getSupabase() as unknown as Record<string | symbol, unknown>)[prop];
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+    persistSession: true,
+    storage: supabaseSecureStorage,
   },
 });

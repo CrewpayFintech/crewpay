@@ -201,25 +201,102 @@ export async function listMyTeams(): Promise<TeamRecord[]> {
   return (result.data ?? []) as TeamRecord[];
 }
 
+type TeamMembershipRow = {
+  role: TeamMemberRole;
+  teams: TeamRecord | TeamRecord[] | null;
+};
+
 export async function listMyTeamMemberships(): Promise<TeamRecord[]> {
-  await ensureAuthenticatedUser();
+  const user = await ensureAuthenticatedUser();
 
   const result = await supabase
     .from('team_members')
     .select(
-      'role, teams(category, category_preset, created_at, custom_category, default_proof_rule, id, join_rule, location, name, owner_id, payout_method, permissions, status, structure_type, task_assignment_rule, task_payout_rule, task_visibility_rule, updated_at)',
+      `role, teams:team_id (
+        category,
+        category_preset,
+        created_at,
+        custom_category,
+        default_proof_rule,
+        id,
+        join_rule,
+        location,
+        name,
+        owner_id,
+        payout_method,
+        permissions,
+        status,
+        structure_type,
+        task_assignment_rule,
+        task_payout_rule,
+        task_visibility_rule,
+        updated_at
+      )`,
     )
+    .eq('profile_id', user.id)
+    .eq('status', 'active')
     .order('created_at', { ascending: false });
 
   if (result.error) {
     throw new Error(result.error.message);
   }
 
-  // @ts-ignore
-  return ((result.data ?? []) as { role: TeamMemberRole; teams: TeamRecord | TeamRecord[] | null }[])
-    .flatMap((row) => {
+  return ((result.data ?? []) as TeamMembershipRow[]).reduce<TeamRecord[]>(
+    (teams, row) => {
       const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
-      if (!team) return [];
-      return [{ ...team, member_role: row.role }];
-    });
+
+      if (team) {
+        teams.push({ ...team, member_role: row.role });
+      }
+
+      return teams;
+    },
+    [],
+  );
+}
+
+export async function updateTeamTaskSettings(
+  teamId: string,
+  settings: TeamTaskSettings,
+): Promise<TeamRecord> {
+  await ensureAuthenticatedUser();
+
+  const result = await supabase.rpc('update_team_task_settings', {
+    p_default_proof_rule: settings.defaultProofRule,
+    p_task_assignment_rule: settings.taskAssignmentRule,
+    p_task_payout_rule: settings.taskPayoutRule,
+    p_task_visibility_rule: settings.taskVisibilityRule,
+    p_team_id: teamId,
+  });
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  return result.data as TeamRecord;
+}
+
+export async function updateTeamAccessSettings(
+  teamId: string,
+  settings: Pick<CreateTeamInput, 'joinRule' | 'permissions'>,
+): Promise<TeamRecord> {
+  await ensureAuthenticatedUser();
+
+  const result = await supabase
+    .from('teams')
+    .update({
+      join_rule: settings.joinRule,
+      permissions: settings.permissions,
+    })
+    .eq('id', teamId)
+    .select(
+      'category, category_preset, created_at, custom_category, default_proof_rule, id, join_rule, location, name, owner_id, payout_method, permissions, status, structure_type, task_assignment_rule, task_payout_rule, task_visibility_rule, updated_at',
+    )
+    .single();
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  return result.data as TeamRecord;
 }

@@ -1,4 +1,5 @@
 import rawCountries from 'world-countries';
+import type { ImageSourcePropType } from 'react-native';
 
 import { palette } from './theme';
 import type { CountryOption, SetupStep, Slide } from '../types/app';
@@ -91,6 +92,16 @@ export const slides: Slide[] = [
 export const passcodeSecuredImage = require('../assets/onboarding/optimized/passcode-secured.png');
 export const checkEmailImage = require('../assets/onboarding/optimized/check-email.jpg');
 export const debitCard3dImage = require('../assets/home/debit-card-3d.png');
+
+export const splashImageAssets = slides
+  .map((slide) => slide.image)
+  .filter((image): image is ImageSourcePropType => Boolean(image));
+
+export const persistentImageAssets = [
+  ...splashImageAssets,
+  passcodeSecuredImage,
+  checkEmailImage,
+];
 
 export const crewLeadSetupSteps: SetupStep[] = [
   'country',

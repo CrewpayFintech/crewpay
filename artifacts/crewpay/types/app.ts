@@ -1,5 +1,19 @@
+import type { ImageSourcePropType } from 'react-native';
+
 import type { CreateTeamInput } from '../lib/team-service';
 import type { TaskWithTeams } from '../lib/task-service';
+
+export type Slide = {
+  eyebrow: string;
+  title: string;
+  body: string;
+  image?: ImageSourcePropType;
+  imageScale?: number;
+  imageOffsetY?: number;
+  imageOffsetX?: number;
+  accent?: string;
+  cta: string;
+};
 
 export type AppScreen =
   | 'onboarding'
@@ -17,7 +31,8 @@ export type AppScreen =
   | 'submissions'
   | 'submit-proof'
   | 'view-task'
-  | 'view-team';
+  | 'view-team'
+  | 'bulk-transfer';
 
 export type EmailStep = 'entry' | 'otp';
 export type AccountIntroSource = 'onboarding' | 'email';
@@ -87,16 +102,4 @@ export type CountryOption = {
   dialCode: string;
   flag: string;
   name: string;
-};
-
-export type Slide = {
-  eyebrow: string;
-  title: string;
-  body: string;
-  image?: number;
-  imageScale?: number;
-  imageOffsetY?: number;
-  imageOffsetX?: number;
-  accent?: string;
-  cta: string;
 };

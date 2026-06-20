@@ -103,22 +103,46 @@ function getReturnUrlParam(inputUrl: string, names: string[]) {
 }
 
 function depositSubtitle(status: WalletTransactionStatus) {
-  if (status === 'succeeded') return 'Added to CrewPay wallet';
-  if (status === 'failed') return 'Top up failed';
-  if (status === 'cancelled') return 'Top up cancelled';
+  if (status === 'succeeded') {
+    return 'Added to CrewPay wallet';
+  }
+
+  if (status === 'failed') {
+    return 'Top up failed';
+  }
+
+  if (status === 'cancelled') {
+    return 'Top up cancelled';
+  }
+
   return 'Waiting for Flutterwave confirmation';
 }
 
 function ledgerTitle(entryType: string) {
-  if (entryType.includes('payout')) return 'Task payout';
-  if (entryType.includes('reserve')) return 'Funds reserved';
+  if (entryType.includes('payout')) {
+    return 'Task payout';
+  }
+
+  if (entryType.includes('reserve')) {
+    return 'Funds reserved';
+  }
+
   return 'Wallet activity';
 }
 
 function ledgerSubtitle(direction: WalletLedgerRow['direction'], status: string) {
-  if (direction === 'reserve') return 'Reserved for approved workers';
-  if (direction === 'debit') return 'Money sent from wallet';
-  if (status === 'posted') return 'Posted to wallet';
+  if (direction === 'reserve') {
+    return 'Reserved for approved workers';
+  }
+
+  if (direction === 'debit') {
+    return 'Money sent from wallet';
+  }
+
+  if (status === 'posted') {
+    return 'Posted to wallet';
+  }
+
   return status;
 }
 
@@ -145,7 +169,7 @@ export async function createWalletDeposit(input: {
 }): Promise<CreateWalletDepositResult> {
   const webOrigin =
     Platform.OS === 'web' && typeof window !== 'undefined'
-      ? (window as unknown as { location: { origin: string } }).location.origin
+      ? window.location.origin
       : '';
   const redirectUrl = webOrigin
     ? `${webOrigin}/wallet/deposit-return`

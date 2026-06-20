@@ -1,8 +1,8 @@
 import type { MyJoinRequestStatus } from '../lib/request-service';
 import type { TaskWithTeams } from '../lib/task-service';
-import type { CreateTeamInput } from '../lib/team-service';
+import type { TeamDraft } from '../types/app';
 
-export function getUniqueTeams(teams: CreateTeamInput[]) {
+export function getUniqueTeams(teams: TeamDraft[]) {
   const seen = new Set<string>();
 
   return teams.filter((team) => {

@@ -1,6 +1,18 @@
+declare const process: {
+  env?: Record<string, string | undefined>;
+};
+
+declare const window:
+  | {
+      location?: {
+        origin?: string;
+      };
+    }
+  | undefined;
+
 const webRedirectUrl =
-  typeof window !== 'undefined' && (window as unknown as { location?: { origin?: string } }).location?.origin
-    ? `${(window as unknown as { location: { origin: string } }).location.origin}/auth/callback`
+  typeof window !== 'undefined' && window.location?.origin
+    ? `${window.location.origin}/auth/callback`
     : '';
 
 export const authRedirectUrl =
