@@ -4,11 +4,10 @@ import { supabase } from './supabase';
 
 export type AuthMode = 'create' | 'login';
 
-const passcodePrefix = 'crewpay.passcode.v1';
-const passcodeAttemptsPrefix = 'crewpay.passcode-attempts.v1';
-const passcodeLockPrefix = 'crewpay.passcode-lock.v1';
+const legacyPasscodePrefix = 'crewpay.passcode.v1';
+const legacyPasscodeAttemptsPrefix = 'crewpay.passcode-attempts.v1';
+const legacyPasscodeLockPrefix = 'crewpay.passcode-lock.v1';
 const maxPasscodeAttempts = 5;
-const lockDurationMs = 5 * 60 * 1000;
 
 function secureKey(prefix: string, userId: string) {
   return `${prefix}.${userId.replace(/[^A-Za-z0-9._-]/g, '_')}`;
@@ -104,20 +103,52 @@ export async function signOut() {
   }
 }
 
+async function clearLegacyPasscode(userId: string) {
+  await Promise.all([
+    AsyncStorage.removeItem(secureKey(legacyPasscodePrefix, userId)),
+    AsyncStorage.removeItem(secureKey(legacyPasscodeAttemptsPrefix, userId)),
+    AsyncStorage.removeItem(secureKey(legacyPasscodeLockPrefix, userId)),
+  ]);
+}
+
 export async function saveLocalPasscode(userId: string, passcode: string) {
   if (!/^\d{4}$/.test(passcode)) {
     throw new Error('Passcode must be 4 digits.');
   }
 
-  await AsyncStorage.setItem(secureKey(passcodePrefix, userId), passcode);
-  await AsyncStorage.removeItem(secureKey(passcodeAttemptsPrefix, userId));
-  await AsyncStorage.removeItem(secureKey(passcodeLockPrefix, userId));
+  const { error } = await supabase.rpc('set_my_passcode', {
+    p_passcode: passcode,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await clearLegacyPasscode(userId);
 }
 
 export async function hasLocalPasscode(userId: string) {
-  const passcode = await AsyncStorage.getItem(secureKey(passcodePrefix, userId));
+  const { data, error } = await supabase.rpc('has_my_passcode');
 
-  return Boolean(passcode);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (data) {
+    await clearLegacyPasscode(userId);
+    return true;
+  }
+
+  const legacyPasscode = await AsyncStorage.getItem(
+    secureKey(legacyPasscodePrefix, userId),
+  );
+
+  if (/^\d{4}$/.test(legacyPasscode ?? '')) {
+    await saveLocalPasscode(userId, legacyPasscode!);
+    return true;
+  }
+
+  return false;
 }
 
 export type PasscodeVerificationResult = {
@@ -130,36 +161,34 @@ export async function verifyLocalPasscode(
   userId: string,
   passcode: string,
 ): Promise<PasscodeVerificationResult> {
-  const lockKey = secureKey(passcodeLockPrefix, userId);
-  const attemptsKey = secureKey(passcodeAttemptsPrefix, userId);
-  const lockedUntilRaw = await AsyncStorage.getItem(lockKey);
-  const lockedUntil = lockedUntilRaw ? Number(lockedUntilRaw) : 0;
-
-  if (lockedUntil > Date.now()) {
-    return { attemptsRemaining: 0, lockedUntil, ok: false };
+  if (!/^\d{4}$/.test(passcode)) {
+    return { attemptsRemaining: 0, ok: false };
   }
 
-  const storedPasscode = await AsyncStorage.getItem(
-    secureKey(passcodePrefix, userId),
-  );
+  const { data, error } = await supabase.rpc('verify_my_passcode', {
+    p_passcode: passcode,
+  });
 
-  if (storedPasscode && storedPasscode === passcode) {
-    await AsyncStorage.removeItem(attemptsKey);
-    await AsyncStorage.removeItem(lockKey);
-    return { attemptsRemaining: maxPasscodeAttempts, ok: true };
+  if (error) {
+    throw new Error(error.message);
   }
 
-  const previousAttempts = Number(await AsyncStorage.getItem(attemptsKey));
-  const attempts = Number.isFinite(previousAttempts) ? previousAttempts + 1 : 1;
-  const attemptsRemaining = Math.max(0, maxPasscodeAttempts - attempts);
+  const result = Array.isArray(data) ? data[0] : data;
+  const lockedUntil = result?.locked_until
+    ? Date.parse(result.locked_until)
+    : undefined;
+  const verification: PasscodeVerificationResult = {
+    attemptsRemaining: Number(
+      result?.attempts_remaining ?? maxPasscodeAttempts,
+    ),
+    lockedUntil:
+      lockedUntil && Number.isFinite(lockedUntil) ? lockedUntil : undefined,
+    ok: Boolean(result?.ok),
+  };
 
-  await AsyncStorage.setItem(attemptsKey, String(attempts));
-
-  if (attempts >= maxPasscodeAttempts) {
-    const nextLockedUntil = Date.now() + lockDurationMs;
-    await AsyncStorage.setItem(lockKey, String(nextLockedUntil));
-    return { attemptsRemaining: 0, lockedUntil: nextLockedUntil, ok: false };
+  if (verification.ok) {
+    await clearLegacyPasscode(userId);
   }
 
-  return { attemptsRemaining, ok: false };
+  return verification;
 }
