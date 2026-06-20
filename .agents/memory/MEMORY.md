@@ -1,0 +1,1 @@
+- [Expo EXPO_PUBLIC env vars](expo-env-vars.md) — Replit secrets aren't picked up by Metro bundler; must write a .env file first via a pre-start script.
