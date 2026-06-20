@@ -272,9 +272,6 @@ const pendingInviteStorageKey = 'crewpay.pendingInvite.v1';
 const pendingInviteTtlMs = 30 * 60 * 1000;
 const preferredRoleStorageKeyPrefix = 'crewpay.preferredRole.v1';
 const seenSubmissionStorageKeyPrefix = 'crewpay.seen-submissions.v1';
-const emergencyPasscodeResetEmail = 'oduna1770@gmail.com';
-const emergencyPasscodeResetParam = 'oduna1770';
-
 type PendingInvite = {
   createdAt?: number;
   teamName?: string;
@@ -953,23 +950,8 @@ export default function App() {
           Platform.OS === 'web' &&
           typeof window !== 'undefined' &&
           isWalletDepositReturnUrl(window.location.href);
-        const shouldEmergencyResetPasscode =
-          Platform.OS === 'web' &&
-          typeof window !== 'undefined' &&
-          normalizeEmail(user.email ?? '') === emergencyPasscodeResetEmail &&
-          new URLSearchParams(window.location.search).get('reset_passcode') ===
-            emergencyPasscodeResetParam;
-
-        if (shouldEmergencyResetPasscode) {
-          await saveLocalPasscode(user.id, '1234');
-          setUnlockCode('');
-          setUnlockError('');
-          window.history.replaceState({}, '', window.location.pathname);
-        }
-
         await routeSignedInUser({
-          requirePasscode:
-            !isReturningFromWalletTopUp && !shouldEmergencyResetPasscode,
+          requirePasscode: !isReturningFromWalletTopUp,
         });
 
         if (isMounted) {
@@ -7318,16 +7300,7 @@ function HomeScreen({
             throw new Error('Please sign in again to continue.');
           }
 
-          const shouldUseEmergencyPasscode =
-            normalizeEmail(user.email ?? '') === emergencyPasscodeResetEmail &&
-            nextCode === '1234';
-          const result = shouldUseEmergencyPasscode
-            ? { attemptsRemaining: 5, ok: true }
-            : await verifyLocalPasscode(user.id, nextCode);
-
-          if (shouldUseEmergencyPasscode) {
-            await saveLocalPasscode(user.id, '1234');
-          }
+          const result = await verifyLocalPasscode(user.id, nextCode);
 
           if (!result.ok) {
             setTopUpPasscode('');
