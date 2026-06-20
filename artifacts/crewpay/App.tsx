@@ -1965,9 +1965,7 @@ export default function App() {
         >
           <BulkTransferScreen
             teams={visibleTeams}
-            membersByTeamId={teamMembersByTeamId}
             onBack={() => setScreen('home')}
-            onRefreshMembers={refreshTeamMembers}
           />
         </View>
       ) : null}
@@ -18909,14 +18907,10 @@ function ChevronDownIcon({ scale }: { scale: number }) {
 }
 
 function BulkTransferScreen({
-  membersByTeamId,
   onBack,
-  onRefreshMembers,
   teams,
 }: {
-  membersByTeamId: Record<string, TeamMemberListItem[]>;
   onBack: () => void;
-  onRefreshMembers: (teamId?: string) => Promise<void>;
   teams: TeamDraft[];
 }) {
   const { width, height } = useWindowDimensions();
@@ -18927,41 +18921,23 @@ function BulkTransferScreen({
   const y = (value: number) => Math.round(value * heightScale);
   const s = (value: number) => Math.round(value * scale);
 
-  type BulkStep = 'select-team' | 'enter-amounts' | 'review' | 'confirm' | 'done';
+  type BulkStep = 'select-team' | 'queue' | 'review' | 'passcode' | 'done';
   const [step, setStep] = useState<BulkStep>('select-team');
   const [selectedTeam, setSelectedTeam] = useState<TeamDraft | null>(null);
-  const [amounts, setAmounts] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
-  const teamMembers = selectedTeam?.id ? (membersByTeamId[selectedTeam.id] ?? []) : [];
-  const payableMembers = teamMembers.filter((m) => m.member_role === 'member');
+  // queue step state
+  const [queueItems, setQueueItems] = useState<PayoutQueueItem[]>([]);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [amountDrafts, setAmountDrafts] = useState<Record<string, string>>({});
+  const [savingAmountId, setSavingAmountId] = useState('');
 
-  const totalAmount = Object.values(amounts).reduce(
-    (sum, val) => sum + parseMoneyAmount(val),
-    0,
-  );
-
-  const recipientCount = Object.values(amounts).filter(
-    (val) => parseMoneyAmount(val) > 0,
-  ).length;
-
-  const handleSelectTeam = async (team: TeamDraft) => {
-    setSelectedTeam(team);
-    setAmounts({});
-    setLoading(true);
-    setError('');
-    try {
-      if (team.id) {
-        await onRefreshMembers(team.id);
-      }
-    } catch {
-      setError('Could not load team members. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-    setStep('enter-amounts');
-  };
+  // passcode step state
+  const [passcode, setPasscode] = useState('');
+  const [passcodeError, setPasscodeError] = useState('');
+  const [reserving, setReserving] = useState(false);
+  const [reservedBatch, setReservedBatch] = useState<{ itemCount: number; totalNaira: number } | null>(null);
 
   const slideAnim = useRef(new Animated.Value(0)).current;
 
@@ -18972,704 +18948,143 @@ function BulkTransferScreen({
       easing: Easing.out(Easing.cubic),
       toValue: 0,
       useNativeDriver: true,
+      isInteraction: false,
     }).start();
-  }, [step, slideAnim]);
+  }, [step]);
 
-  const slideTranslate = slideAnim.interpolate({
+  function money(v: number) {
+    return `\u20a6${Number(v || 0).toLocaleString()}`;
+  }
+
+  function parseAmt(str: string) {
+    return Number(str.replace(/[^0-9.]/g, '')) || 0;
+  }
+
+  const pendingItems = queueItems.filter((item) => item.status === 'pending');
+  const allSelected =
+    pendingItems.length > 0 &&
+    pendingItems.every((item) => selectedIds.includes(item.payout_approval_id));
+
+  const selectedTotal = useMemo(() => {
+    const sel = new Set(selectedIds);
+    return queueItems.reduce((total, item) => {
+      if (!sel.has(item.payout_approval_id)) return total;
+      return total + parseAmt(amountDrafts[item.payout_approval_id] ?? '0');
+    }, 0);
+  }, [amountDrafts, queueItems, selectedIds]);
+
+  const selectedItems = useMemo(() => {
+    const sel = new Set(selectedIds);
+    return queueItems.filter((item) => sel.has(item.payout_approval_id));
+  }, [queueItems, selectedIds]);
+
+  const loadQueue = async (teamId: string) => {
+    setQueueLoading(true);
+    setQueueError('');
+    try {
+      const items = await listTeamPayoutQueue(teamId);
+      setQueueItems(items);
+      const initialIds = items
+        .filter((item) => item.status === 'pending')
+        .map((item) => item.payout_approval_id);
+      setSelectedIds(initialIds);
+      setAmountDrafts(
+        items.reduce<Record<string, string>>((acc, item) => {
+          acc[item.payout_approval_id] = String(Number(item.amount_naira || 0));
+          return acc;
+        }, {}),
+      );
+    } catch (err) {
+      setQueueError(err instanceof Error ? err.message : 'Could not load payout queue.');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  const handleSelectTeam = async (team: TeamDraft) => {
+    setSelectedTeam(team);
+    setStep('queue');
+    if (team.id) {
+      await loadQueue(team.id);
+    }
+  };
+
+  const saveAmount = async (item: PayoutQueueItem) => {
+    const nextAmount = parseAmt(amountDrafts[item.payout_approval_id] ?? '0');
+    if (nextAmount <= 0) {
+      Alert.alert('Enter an amount', 'Payout amount must be greater than zero.');
+      return;
+    }
+    setSavingAmountId(item.payout_approval_id);
+    try {
+      await updatePayoutApprovalAmount(item.payout_approval_id, nextAmount);
+      setQueueItems((prev) =>
+        prev.map((qi) =>
+          qi.payout_approval_id === item.payout_approval_id
+            ? { ...qi, amount_naira: nextAmount }
+            : qi,
+        ),
+      );
+    } catch (err) {
+      Alert.alert('Could not update', err instanceof Error ? err.message : 'Try again.');
+    } finally {
+      setSavingAmountId('');
+    }
+  };
+
+  const toggleItem = (approvalId: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(approvalId) ? prev.filter((id) => id !== approvalId) : [...prev, approvalId],
+    );
+  };
+
+  const handleConfirmPasscode = async () => {
+    if (passcode.length !== 4) {
+      setPasscodeError('Enter your 4-digit passcode.');
+      return;
+    }
+    setReserving(true);
+    setPasscodeError('');
+    try {
+      const user = await getCurrentUser();
+      const valid = await verifyLocalPasscode(user.id, passcode);
+      if (!valid) {
+        setPasscodeError('Wrong passcode. Try again.');
+        setReserving(false);
+        return;
+      }
+      if (!selectedTeam?.id) throw new Error('No team selected.');
+      const batch = await reservePayoutApprovals(selectedTeam.id, selectedIds);
+      setReservedBatch({ itemCount: batch.item_count, totalNaira: batch.total_amount_naira });
+      setStep('done');
+    } catch (err) {
+      setPasscodeError(err instanceof Error ? err.message : 'Could not process payouts.');
+    } finally {
+      setReserving(false);
+    }
+  };
+
+  const screenTranslate = slideAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, y(60)],
+    outputRange: [0, 22],
   });
 
+  // ── select-team step ─────────────────────────────────────────────────────
   if (step === 'select-team') {
     return (
-      <View style={{ backgroundColor: palette.paper, flex: 1 }}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onBack}
-          style={({ pressed }) => ({
-            alignItems: 'center',
-            height: s(46),
-            justifyContent: 'center',
-            left: x(28),
-            opacity: pressed ? 0.45 : 1,
-            position: 'absolute',
-            top: y(60),
-            width: s(46),
-          })}
-        >
-          <ArrowLeftIcon scale={s(1) * 0.8} />
-        </Pressable>
-        <Animated.View
-          style={[
-            { flex: 1, paddingTop: y(130) },
-            { opacity: Animated.subtract(new Animated.Value(1), slideAnim), transform: [{ translateY: slideTranslate }] },
-          ]}
-        >
-          <Text
-            selectable
-            style={{
-              color: palette.ink,
-              fontSize: appFontSize(s, 34),
-              fontWeight: '900',
-              letterSpacing: -0.9,
-              marginBottom: y(6),
-              paddingHorizontal: x(54),
-            }}
-          >
-            Bulk Transfer
-          </Text>
-          <Text
-            selectable
-            style={{
-              color: palette.muted,
-              fontSize: appFontSize(s, 20),
-              fontWeight: '500',
-              letterSpacing: -0.2,
-              marginBottom: y(42),
-              paddingHorizontal: x(54),
-            }}
-          >
-            Choose a team to pay multiple members
-          </Text>
-
-          {teams.length === 0 ? (
-            <View
-              style={{
-                alignItems: 'center',
-                flex: 1,
-                justifyContent: 'center',
-                paddingHorizontal: x(54),
-              }}
-            >
-              <Text
-                selectable
-                style={{
-                  color: palette.muted,
-                  fontSize: appFontSize(s, 20),
-                  fontWeight: '600',
-                  textAlign: 'center',
-                }}
-              >
-                Create a team first to bulk transfer payments.
-              </Text>
-            </View>
-          ) : (
-            <ScrollView
-              contentContainerStyle={{ paddingHorizontal: x(54), paddingBottom: y(40) }}
-              showsVerticalScrollIndicator={false}
-            >
-              {teams.filter((t) => t.id).map((team) => (
-                <Pressable
-                  key={team.id}
-                  accessibilityRole="button"
-                  onPress={() => handleSelectTeam(team)}
-                  style={({ pressed }) => ({
-                    alignItems: 'center',
-                    backgroundColor: '#ffffff',
-                    borderColor: palette.rail,
-                    borderRadius: s(20),
-                    borderWidth: 1.5,
-                    flexDirection: 'row',
-                    marginBottom: y(16),
-                    minHeight: y(84),
-                    opacity: pressed ? 0.72 : 1,
-                    paddingHorizontal: x(28),
-                    paddingVertical: y(20),
-                    transform: [{ scale: pressed ? 0.985 : 1 }],
-                  })}
-                >
-                  <TeamAvatar name={team.name} s={s} />
-                  <View style={{ flex: 1, marginLeft: x(20) }}>
-                    <Text
-                      selectable
-                      style={{
-                        color: palette.ink,
-                        fontSize: appFontSize(s, 22),
-                        fontWeight: '800',
-                        letterSpacing: -0.4,
-                      }}
-                    >
-                      {team.name}
-                    </Text>
-                    {team.location ? (
-                      <Text
-                        selectable
-                        style={{
-                          color: palette.muted,
-                          fontSize: appFontSize(s, 17),
-                          fontWeight: '500',
-                          marginTop: y(3),
-                        }}
-                      >
-                        {team.location}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <ChevronRightIcon scale={s(1) * 0.6} />
-                </Pressable>
-              ))}
-            </ScrollView>
-          )}
-        </Animated.View>
-      </View>
-    );
-  }
-
-  if (step === 'enter-amounts') {
-    return (
-      <View style={{ backgroundColor: palette.paper, flex: 1 }}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setStep('select-team')}
-          style={({ pressed }) => ({
-            alignItems: 'center',
-            height: s(46),
-            justifyContent: 'center',
-            left: x(28),
-            opacity: pressed ? 0.45 : 1,
-            position: 'absolute',
-            top: y(60),
-            width: s(46),
-          })}
-        >
-          <ArrowLeftIcon scale={s(1) * 0.8} />
-        </Pressable>
-        <Animated.View
-          style={[
-            { flex: 1, paddingTop: y(130) },
-            { opacity: Animated.subtract(new Animated.Value(1), slideAnim), transform: [{ translateY: slideTranslate }] },
-          ]}
-        >
-          <Text
-            selectable
-            style={{
-              color: palette.ink,
-              fontSize: appFontSize(s, 30),
-              fontWeight: '900',
-              letterSpacing: -0.8,
-              marginBottom: y(4),
-              paddingHorizontal: x(54),
-            }}
-          >
-            {selectedTeam?.name}
-          </Text>
-          <Text
-            selectable
-            style={{
-              color: palette.muted,
-              fontSize: appFontSize(s, 19),
-              fontWeight: '500',
-              letterSpacing: -0.2,
-              marginBottom: y(32),
-              paddingHorizontal: x(54),
-            }}
-          >
-            Enter amount per member
-          </Text>
-
-          {error ? (
-            <Text
-              selectable
-              style={{
-                color: '#e05252',
-                fontSize: appFontSize(s, 17),
-                fontWeight: '600',
-                marginBottom: y(16),
-                paddingHorizontal: x(54),
-              }}
-            >
-              {error}
-            </Text>
-          ) : null}
-
-          {loading ? (
-            <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center' }}>
-              <Text selectable style={{ color: palette.muted, fontSize: appFontSize(s, 18) }}>
-                Loading members...
-              </Text>
-            </View>
-          ) : payableMembers.length === 0 ? (
-            <View
-              style={{
-                alignItems: 'center',
-                flex: 1,
-                justifyContent: 'center',
-                paddingHorizontal: x(54),
-              }}
-            >
-              <Text
-                selectable
-                style={{
-                  color: palette.muted,
-                  fontSize: appFontSize(s, 19),
-                  fontWeight: '600',
-                  textAlign: 'center',
-                }}
-              >
-                No crew members found in this team.
-              </Text>
-            </View>
-          ) : (
-            <ScrollView
-              contentContainerStyle={{ paddingBottom: y(140), paddingHorizontal: x(54) }}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
-              {payableMembers.map((member) => (
-                <View
-                  key={member.user_id}
-                  style={{
-                    borderBottomColor: palette.rail,
-                    borderBottomWidth: 1,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: x(16),
-                    paddingVertical: y(18),
-                  }}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      selectable
-                      style={{
-                        color: palette.ink,
-                        fontSize: appFontSize(s, 20),
-                        fontWeight: '700',
-                        letterSpacing: -0.3,
-                      }}
-                    >
-                      {member.display_name || member.email || 'Member'}
-                    </Text>
-                    {member.email ? (
-                      <Text
-                        selectable
-                        style={{
-                          color: palette.muted,
-                          fontSize: appFontSize(s, 16),
-                          fontWeight: '500',
-                          marginTop: y(2),
-                        }}
-                      >
-                        {member.email}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <View
-                    style={{
-                      alignItems: 'center',
-                      backgroundColor: '#ffffff',
-                      borderColor: palette.rail,
-                      borderRadius: s(14),
-                      borderWidth: 1.5,
-                      flexDirection: 'row',
-                      paddingHorizontal: x(14),
-                      paddingVertical: y(10),
-                      width: x(160),
-                    }}
-                  >
-                    <Text
-                      selectable
-                      style={{
-                        color: palette.muted,
-                        fontSize: appFontSize(s, 19),
-                        fontWeight: '700',
-                        marginRight: x(4),
-                      }}
-                    >
-                      {nairaSymbol}
-                    </Text>
-                    <TextInput
-                      keyboardType="numeric"
-                      onChangeText={(val) => {
-                        const digits = val.replace(/[^0-9]/g, '');
-                        setAmounts((prev) => ({ ...prev, [member.user_id]: digits }));
-                      }}
-                      placeholder="0"
-                      placeholderTextColor={palette.muted}
-                      style={{
-                        color: palette.ink,
-                        flex: 1,
-                        fontSize: appFontSize(s, 20),
-                        fontWeight: '800',
-                        padding: 0,
-                      }}
-                      value={amounts[member.user_id] ?? ''}
-                    />
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-          )}
-        </Animated.View>
-
-        {!loading && payableMembers.length > 0 ? (
-          <View
-            style={{
-              backgroundColor: palette.paper,
-              borderTopColor: palette.rail,
-              borderTopWidth: 1,
-              bottom: 0,
-              left: 0,
-              paddingBottom: y(40),
-              paddingHorizontal: x(54),
-              paddingTop: y(20),
-              position: 'absolute',
-              right: 0,
-            }}
-          >
-            <View
-              style={{
-                alignItems: 'center',
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                marginBottom: y(16),
-              }}
-            >
-              <Text
-                selectable
-                style={{
-                  color: palette.muted,
-                  fontSize: appFontSize(s, 18),
-                  fontWeight: '600',
-                }}
-              >
-                {recipientCount} {recipientCount === 1 ? 'recipient' : 'recipients'}
-              </Text>
-              <Text
-                selectable
-                style={{
-                  color: palette.ink,
-                  fontSize: appFontSize(s, 20),
-                  fontWeight: '900',
-                  letterSpacing: -0.4,
-                }}
-              >
-                {nairaSymbol}{formatMoneyInput(String(totalAmount))} total
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              disabled={totalAmount <= 0}
-              onPress={() => setStep('review')}
-              style={({ pressed }) => ({
-                alignItems: 'center',
-                backgroundColor: totalAmount <= 0 ? '#d9ddd3' : palette.ink,
-                borderRadius: 999,
-                height: y(68),
-                justifyContent: 'center',
-                opacity: pressed ? 0.82 : 1,
-                transform: [{ scale: pressed ? 0.985 : 1 }],
-              })}
-            >
-              <Text
-                selectable
-                style={{
-                  color: totalAmount <= 0 ? '#8a9082' : '#ffffff',
-                  fontSize: appFontSize(s, 22),
-                  fontWeight: '900',
-                  letterSpacing: -0.4,
-                }}
-              >
-                Review Transfer
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-      </View>
-    );
-  }
-
-  if (step === 'review') {
-    const recipients = payableMembers.filter(
-      (m) => parseMoneyAmount(amounts[m.user_id] ?? '') > 0,
-    );
-
-    return (
-      <View style={{ backgroundColor: palette.paper, flex: 1 }}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setStep('enter-amounts')}
-          style={({ pressed }) => ({
-            alignItems: 'center',
-            height: s(46),
-            justifyContent: 'center',
-            left: x(28),
-            opacity: pressed ? 0.45 : 1,
-            position: 'absolute',
-            top: y(60),
-            width: s(46),
-          })}
-        >
-          <ArrowLeftIcon scale={s(1) * 0.8} />
-        </Pressable>
-        <Animated.View
-          style={[
-            { flex: 1, paddingTop: y(130) },
-            { opacity: Animated.subtract(new Animated.Value(1), slideAnim), transform: [{ translateY: slideTranslate }] },
-          ]}
-        >
-          <Text
-            selectable
-            style={{
-              color: palette.ink,
-              fontSize: appFontSize(s, 34),
-              fontWeight: '900',
-              letterSpacing: -0.9,
-              marginBottom: y(6),
-              paddingHorizontal: x(54),
-            }}
-          >
-            Review
-          </Text>
-          <Text
-            selectable
-            style={{
-              color: palette.muted,
-              fontSize: appFontSize(s, 19),
-              fontWeight: '500',
-              letterSpacing: -0.2,
-              marginBottom: y(32),
-              paddingHorizontal: x(54),
-            }}
-          >
-            Confirm who gets paid
-          </Text>
-
-          <ScrollView
-            contentContainerStyle={{ paddingBottom: y(160), paddingHorizontal: x(54) }}
-            showsVerticalScrollIndicator={false}
-          >
-            <View
-              style={{
-                backgroundColor: '#ffffff',
-                borderColor: palette.rail,
-                borderRadius: s(20),
-                borderWidth: 1.5,
-                marginBottom: y(20),
-                overflow: 'hidden',
-              }}
-            >
-              {recipients.map((member, index) => {
-                const amt = parseMoneyAmount(amounts[member.user_id] ?? '');
-                return (
-                  <View
-                    key={member.user_id}
-                    style={{
-                      alignItems: 'center',
-                      borderTopColor: palette.rail,
-                      borderTopWidth: index > 0 ? 1 : 0,
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                      paddingHorizontal: x(24),
-                      paddingVertical: y(18),
-                    }}
-                  >
-                    <Text
-                      selectable
-                      style={{
-                        color: palette.ink,
-                        flex: 1,
-                        fontSize: appFontSize(s, 19),
-                        fontWeight: '700',
-                        letterSpacing: -0.3,
-                      }}
-                    >
-                      {member.display_name || member.email || 'Member'}
-                    </Text>
-                    <Text
-                      selectable
-                      style={{
-                        color: palette.greenDeep,
-                        fontSize: appFontSize(s, 20),
-                        fontWeight: '900',
-                        letterSpacing: -0.4,
-                      }}
-                    >
-                      {nairaSymbol}{formatNairaWhole(amt)}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-
-            <View
-              style={{
-                alignItems: 'center',
-                backgroundColor: '#ffffff',
-                borderColor: palette.rail,
-                borderRadius: s(20),
-                borderWidth: 1.5,
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                paddingHorizontal: x(24),
-                paddingVertical: y(20),
-              }}
-            >
-              <Text
-                selectable
-                style={{
-                  color: palette.muted,
-                  fontSize: appFontSize(s, 19),
-                  fontWeight: '700',
-                }}
-              >
-                Total to {recipients.length} {recipients.length === 1 ? 'member' : 'members'}
-              </Text>
-              <Text
-                selectable
-                style={{
-                  color: palette.ink,
-                  fontSize: appFontSize(s, 22),
-                  fontWeight: '900',
-                  letterSpacing: -0.5,
-                }}
-              >
-                {nairaSymbol}{formatNairaWhole(totalAmount)}
-              </Text>
-            </View>
-          </ScrollView>
-        </Animated.View>
-
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+          transform: [{ translateY: screenTranslate }],
+        }}
+      >
         <View
           style={{
+            flex: 1,
             backgroundColor: palette.paper,
-            borderTopColor: palette.rail,
-            borderTopWidth: 1,
-            bottom: 0,
-            left: 0,
-            paddingBottom: y(40),
-            paddingHorizontal: x(54),
-            paddingTop: y(20),
-            position: 'absolute',
-            right: 0,
-          }}
-        >
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setStep('confirm')}
-            style={({ pressed }) => ({
-              alignItems: 'center',
-              backgroundColor: palette.ink,
-              borderRadius: 999,
-              height: y(68),
-              justifyContent: 'center',
-              opacity: pressed ? 0.82 : 1,
-              transform: [{ scale: pressed ? 0.985 : 1 }],
-            })}
-          >
-            <Text
-              selectable
-              style={{
-                color: '#ffffff',
-                fontSize: appFontSize(s, 22),
-                fontWeight: '900',
-                letterSpacing: -0.4,
-              }}
-            >
-              Confirm & Pay
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  if (step === 'confirm') {
-    const recipients = payableMembers.filter(
-      (m) => parseMoneyAmount(amounts[m.user_id] ?? '') > 0,
-    );
-
-    return (
-      <View style={{ backgroundColor: palette.paper, flex: 1 }}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setStep('review')}
-          style={({ pressed }) => ({
-            alignItems: 'center',
-            height: s(46),
-            justifyContent: 'center',
-            left: x(28),
-            opacity: pressed ? 0.45 : 1,
-            position: 'absolute',
-            top: y(60),
-            width: s(46),
-          })}
-        >
-          <ArrowLeftIcon scale={s(1) * 0.8} />
-        </Pressable>
-        <Animated.View
-          style={[
-            { flex: 1, paddingTop: y(130) },
-            { opacity: Animated.subtract(new Animated.Value(1), slideAnim), transform: [{ translateY: slideTranslate }] },
-          ]}
-        >
-          <Text
-            selectable
-            style={{
-              color: palette.ink,
-              fontSize: appFontSize(s, 34),
-              fontWeight: '900',
-              letterSpacing: -0.9,
-              marginBottom: y(6),
-              paddingHorizontal: x(54),
-            }}
-          >
-            Paying Crew
-          </Text>
-          <Text
-            selectable
-            style={{
-              color: palette.muted,
-              fontSize: appFontSize(s, 19),
-              fontWeight: '500',
-              letterSpacing: -0.2,
-              marginBottom: y(48),
-              paddingHorizontal: x(54),
-            }}
-          >
-            {nairaSymbol}{formatNairaWhole(totalAmount)} to {recipients.length} {recipients.length === 1 ? 'member' : 'members'}
-          </Text>
-
-          <View
-            style={{
-              alignItems: 'center',
-              backgroundColor: palette.green,
-              borderRadius: s(80),
-              height: s(80),
-              justifyContent: 'center',
-              marginBottom: y(32),
-              marginHorizontal: x(54),
-            }}
-          >
-            <Send color={palette.greenDeep} size={s(36)} strokeWidth={2.8} />
-          </View>
-
-          <Text
-            selectable
-            style={{
-              color: palette.muted,
-              fontSize: appFontSize(s, 18),
-              fontWeight: '600',
-              paddingHorizontal: x(54),
-              textAlign: 'center',
-            }}
-          >
-            Transfer queued for processing.{'\n'}
-            Payouts will be sent to registered bank accounts.
-          </Text>
-        </Animated.View>
-
-        <View
-          style={{
-            backgroundColor: palette.paper,
-            borderTopColor: palette.rail,
-            borderTopWidth: 1,
-            bottom: 0,
-            left: 0,
-            paddingBottom: y(40),
-            paddingHorizontal: x(54),
-            paddingTop: y(20),
-            position: 'absolute',
-            right: 0,
+            paddingHorizontal: x(24),
+            paddingTop: y(18),
           }}
         >
           <Pressable
@@ -19677,28 +19092,825 @@ function BulkTransferScreen({
             onPress={onBack}
             style={({ pressed }) => ({
               alignItems: 'center',
-              backgroundColor: palette.ink,
+              backgroundColor: pressed ? '#e8ead3' : '#f0f1ea',
               borderRadius: 999,
-              height: y(68),
+              height: s(40),
               justifyContent: 'center',
-              opacity: pressed ? 0.82 : 1,
-              transform: [{ scale: pressed ? 0.985 : 1 }],
+              marginBottom: y(28),
+              width: s(40),
+            })}
+          >
+            <ArrowLeftIcon color={palette.ink} size={s(20)} strokeWidth={2.5} />
+          </Pressable>
+
+          <Text
+            selectable
+            style={{
+              color: palette.ink,
+              fontSize: s(30),
+              fontWeight: '900',
+              letterSpacing: -0.8,
+              lineHeight: s(36),
+            }}
+          >
+            Bulk transfer
+          </Text>
+          <Text
+            selectable
+            style={{
+              color: '#747a70',
+              fontSize: s(15),
+              fontWeight: '500',
+              lineHeight: s(22),
+              marginTop: y(7),
+            }}
+          >
+            Pay your crew's approved task submissions in one batch. Select a team to see payout-ready work.
+          </Text>
+
+          <ScrollView
+            contentContainerStyle={{ gap: y(10), paddingTop: y(24), paddingBottom: y(40) }}
+            showsVerticalScrollIndicator={false}
+          >
+            {teams.length === 0 ? (
+              <Text style={{ color: '#8c9188', fontSize: s(15), fontWeight: '500', marginTop: y(16) }}>
+                No teams available.
+              </Text>
+            ) : (
+              teams.map((team) => (
+                <Pressable
+                  key={team.id ?? team.name}
+                  accessibilityRole="button"
+                  onPress={() => handleSelectTeam(team)}
+                  style={({ pressed }) => ({
+                    alignItems: 'center',
+                    backgroundColor: pressed ? '#eceee5' : '#f5f6f0',
+                    borderColor: '#e2e4db',
+                    borderRadius: s(20),
+                    borderWidth: 1,
+                    flexDirection: 'row',
+                    gap: x(12),
+                    paddingHorizontal: x(16),
+                    paddingVertical: y(14),
+                  })}
+                >
+                  <View
+                    style={{
+                      alignItems: 'center',
+                      backgroundColor: palette.green,
+                      borderRadius: 999,
+                      height: s(40),
+                      justifyContent: 'center',
+                      width: s(40),
+                    }}
+                  >
+                    <Text style={{ fontSize: s(18) }}>
+                      {(team.name ?? 'T').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      selectable
+                      style={{ color: palette.ink, fontSize: s(16), fontWeight: '800', letterSpacing: -0.2 }}
+                    >
+                      {team.name ?? 'Unnamed team'}
+                    </Text>
+                    {team.description ? (
+                      <Text
+                        selectable
+                        style={{ color: '#747a70', fontSize: s(13), fontWeight: '500', marginTop: 2 }}
+                        numberOfLines={1}
+                      >
+                        {team.description}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <ArrowLeftIcon
+                    color="#a0a59d"
+                    size={s(18)}
+                    strokeWidth={2.5}
+                    style={{ transform: [{ rotate: '180deg' }] }}
+                  />
+                </Pressable>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </Animated.View>
+    );
+  }
+
+  // ── queue step ────────────────────────────────────────────────────────────
+  if (step === 'queue') {
+    return (
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+          transform: [{ translateY: screenTranslate }],
+        }}
+      >
+        <View style={{ flex: 1, backgroundColor: palette.paper }}>
+          {/* Header */}
+          <View
+            style={{
+              alignItems: 'center',
+              flexDirection: 'row',
+              gap: x(10),
+              paddingHorizontal: x(24),
+              paddingTop: y(18),
+              paddingBottom: y(14),
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setStep('select-team')}
+              style={({ pressed }) => ({
+                alignItems: 'center',
+                backgroundColor: pressed ? '#e8ead3' : '#f0f1ea',
+                borderRadius: 999,
+                height: s(40),
+                justifyContent: 'center',
+                width: s(40),
+              })}
+            >
+              <ArrowLeftIcon color={palette.ink} size={s(20)} strokeWidth={2.5} />
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <Text
+                selectable
+                style={{ color: palette.ink, fontSize: s(20), fontWeight: '900', letterSpacing: -0.5 }}
+              >
+                {selectedTeam?.name ?? 'Payout queue'}
+              </Text>
+              <Text
+                selectable
+                style={{ color: '#747a70', fontSize: s(12), fontWeight: '600', marginTop: 1 }}
+              >
+                Approved task submissions
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => selectedTeam?.id && loadQueue(selectedTeam.id)}
+              style={({ pressed }) => ({
+                alignItems: 'center',
+                backgroundColor: pressed ? '#e8ead3' : '#f0f1ea',
+                borderRadius: 999,
+                height: s(36),
+                justifyContent: 'center',
+                width: s(36),
+              })}
+            >
+              <Text style={{ fontSize: s(16) }}>↻</Text>
+            </Pressable>
+          </View>
+
+          {/* Selected total bar */}
+          <View
+            style={{
+              alignItems: 'center',
+              backgroundColor: '#f7f8f4',
+              borderColor: '#eceee7',
+              borderRadius: s(18),
+              borderWidth: 1,
+              flexDirection: 'row',
+              marginHorizontal: x(20),
+              marginBottom: y(10),
+              padding: x(14),
+            }}
+          >
+            <View
+              style={{
+                alignItems: 'center',
+                backgroundColor: palette.green,
+                borderRadius: 999,
+                height: s(36),
+                justifyContent: 'center',
+                width: s(36),
+              }}
+            >
+              <Text style={{ fontSize: s(16) }}>₦</Text>
+            </View>
+            <View style={{ flex: 1, marginLeft: x(10) }}>
+              <Text
+                selectable
+                style={{ color: palette.ink, fontSize: s(19), fontWeight: '900' }}
+              >
+                {money(selectedTotal)}
+              </Text>
+              <Text
+                selectable
+                style={{ color: '#8c9188', fontSize: s(11), fontWeight: '800', textTransform: 'uppercase', marginTop: 1 }}
+              >
+                {selectedIds.length} selected
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                setSelectedIds(
+                  allSelected ? [] : pendingItems.map((item) => item.payout_approval_id),
+                )
+              }
+              style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1 })}
+            >
+              <Text
+                selectable
+                style={{
+                  color: allSelected ? '#747a70' : palette.greenDeep,
+                  fontSize: s(13),
+                  fontWeight: '900',
+                }}
+              >
+                {allSelected ? 'Clear' : 'Select all'}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Queue list */}
+          {queueLoading ? (
+            <View style={{ alignItems: 'center', paddingVertical: y(48) }}>
+              <ActivityIndicator color={palette.greenDeep} />
+              <Text style={{ color: '#8c9188', fontSize: s(14), fontWeight: '600', marginTop: y(12) }}>
+                Loading payout queue...
+              </Text>
+            </View>
+          ) : queueError ? (
+            <View style={{ alignItems: 'center', paddingHorizontal: x(32), paddingVertical: y(36) }}>
+              <Text style={{ color: '#e05252', fontSize: s(14), fontWeight: '700', textAlign: 'center' }}>
+                {queueError}
+              </Text>
+              <Pressable
+                onPress={() => selectedTeam?.id && loadQueue(selectedTeam.id)}
+                style={{ marginTop: y(14) }}
+              >
+                <Text style={{ color: palette.greenDeep, fontSize: s(14), fontWeight: '900' }}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : queueItems.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingHorizontal: x(32), paddingVertical: y(48) }}>
+              <Text
+                selectable
+                style={{ color: palette.ink, fontSize: s(17), fontWeight: '900', textAlign: 'center' }}
+              >
+                No approved submissions yet
+              </Text>
+              <Text
+                selectable
+                style={{ color: '#8c9188', fontSize: s(14), fontWeight: '500', lineHeight: s(20), marginTop: y(8), textAlign: 'center' }}
+              >
+                Once you approve crew work it appears here for payout.
+              </Text>
+            </View>
+          ) : (
+            <ScrollView
+              contentContainerStyle={{ gap: y(10), paddingHorizontal: x(20), paddingBottom: y(120) }}
+              showsVerticalScrollIndicator={false}
+            >
+              {queueItems.map((item) => {
+                const selected = selectedIds.includes(item.payout_approval_id);
+                const draft = amountDrafts[item.payout_approval_id] ?? '';
+                const isDirty = parseAmt(draft) !== Number(item.amount_naira || 0);
+                const isSaving = savingAmountId === item.payout_approval_id;
+                const isPending = item.status === 'pending';
+
+                return (
+                  <View
+                    key={item.payout_approval_id}
+                    style={{
+                      backgroundColor: '#fbfcf8',
+                      borderColor: selected ? palette.green : '#eceee7',
+                      borderRadius: s(20),
+                      borderWidth: 1.5,
+                      padding: x(14),
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row' }}>
+                      <Pressable
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: selected }}
+                        disabled={!isPending}
+                        onPress={() => toggleItem(item.payout_approval_id)}
+                        style={({ pressed }) => ({
+                          alignItems: 'center',
+                          backgroundColor: selected ? palette.green : '#ffffff',
+                          borderColor: selected ? palette.green : '#dfe2da',
+                          borderRadius: 999,
+                          borderWidth: 1,
+                          height: s(28),
+                          justifyContent: 'center',
+                          opacity: pressed ? 0.7 : 1,
+                          width: s(28),
+                        })}
+                      >
+                        {selected ? (
+                          <Text style={{ color: palette.ink, fontSize: s(14), fontWeight: '900' }}>✓</Text>
+                        ) : null}
+                      </Pressable>
+                      <View style={{ flex: 1, marginLeft: x(11) }}>
+                        <Text
+                          selectable
+                          style={{ color: palette.ink, fontSize: s(16), fontWeight: '900', letterSpacing: -0.2 }}
+                        >
+                          {item.member_name}
+                        </Text>
+                        <Text
+                          selectable
+                          style={{ color: '#747a70', fontSize: s(12), fontWeight: '600', marginTop: 2 }}
+                        >
+                          {item.task_title}
+                        </Text>
+                        <Text
+                          selectable
+                          style={{ color: '#a0a59d', fontSize: s(11), fontWeight: '700', marginTop: 3 }}
+                        >
+                          {item.bank_name || 'No bank'} · {item.account_number || 'No account'}
+                        </Text>
+                      </View>
+                      {!isPending ? (
+                        <View
+                          style={{
+                            alignSelf: 'flex-start',
+                            backgroundColor: '#eceee7',
+                            borderRadius: 999,
+                            paddingHorizontal: x(10),
+                            paddingVertical: 3,
+                          }}
+                        >
+                          <Text style={{ color: '#747a70', fontSize: s(11), fontWeight: '900', textTransform: 'uppercase' }}>
+                            {item.status}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    {isPending ? (
+                      <View style={{ alignItems: 'center', flexDirection: 'row', gap: x(8), marginTop: y(12) }}>
+                        <TextInput
+                          keyboardType="decimal-pad"
+                          onChangeText={(val) =>
+                            setAmountDrafts((prev) => ({ ...prev, [item.payout_approval_id]: val }))
+                          }
+                          placeholder="0"
+                          placeholderTextColor="#a5aaa0"
+                          style={{
+                            backgroundColor: '#ffffff',
+                            borderColor: '#dfe2da',
+                            borderRadius: s(14),
+                            borderWidth: 1,
+                            color: palette.ink,
+                            flex: 1,
+                            fontSize: s(17),
+                            fontWeight: '900',
+                            height: s(46),
+                            paddingHorizontal: x(13),
+                          }}
+                          value={draft}
+                        />
+                        <Pressable
+                          accessibilityRole="button"
+                          disabled={!isDirty || isSaving}
+                          onPress={() => saveAmount(item)}
+                          style={({ pressed }) => ({
+                            alignItems: 'center',
+                            backgroundColor: isDirty ? palette.green : '#f0f1eb',
+                            borderRadius: 999,
+                            height: s(46),
+                            justifyContent: 'center',
+                            opacity: pressed ? 0.72 : 1,
+                            paddingHorizontal: x(18),
+                          })}
+                        >
+                          <Text style={{ color: palette.ink, fontSize: s(13), fontWeight: '900' }}>
+                            {isSaving ? 'Saving' : 'Save'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          {/* Continue button */}
+          {!queueLoading && !queueError && selectedIds.length > 0 ? (
+            <View
+              style={{
+                backgroundColor: palette.paper,
+                borderTopColor: '#eceee7',
+                borderTopWidth: 1,
+                bottom: 0,
+                left: 0,
+                paddingBottom: y(32),
+                paddingHorizontal: x(20),
+                paddingTop: y(14),
+                position: 'absolute',
+                right: 0,
+              }}
+            >
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setStep('review')}
+                style={({ pressed }) => ({
+                  alignItems: 'center',
+                  backgroundColor: palette.ink,
+                  borderRadius: 999,
+                  height: s(54),
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.78 : 1,
+                })}
+              >
+                <Text style={{ color: '#ffffff', fontSize: s(15), fontWeight: '900', letterSpacing: -0.1 }}>
+                  Review {selectedIds.length} payout{selectedIds.length === 1 ? '' : 's'} · {money(selectedTotal)}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+      </Animated.View>
+    );
+  }
+
+  // ── review step ───────────────────────────────────────────────────────────
+  if (step === 'review') {
+    return (
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+          transform: [{ translateY: screenTranslate }],
+        }}
+      >
+        <View style={{ flex: 1, backgroundColor: palette.paper }}>
+          <View
+            style={{
+              alignItems: 'center',
+              flexDirection: 'row',
+              gap: x(10),
+              paddingHorizontal: x(24),
+              paddingTop: y(18),
+              paddingBottom: y(14),
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setStep('queue')}
+              style={({ pressed }) => ({
+                alignItems: 'center',
+                backgroundColor: pressed ? '#e8ead3' : '#f0f1ea',
+                borderRadius: 999,
+                height: s(40),
+                justifyContent: 'center',
+                width: s(40),
+              })}
+            >
+              <ArrowLeftIcon color={palette.ink} size={s(20)} strokeWidth={2.5} />
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <Text
+                selectable
+                style={{ color: palette.ink, fontSize: s(22), fontWeight: '900', letterSpacing: -0.6 }}
+              >
+                Review transfers
+              </Text>
+            </View>
+          </View>
+
+          {/* Total card */}
+          <View
+            style={{
+              alignItems: 'center',
+              backgroundColor: palette.ink,
+              borderRadius: s(24),
+              marginHorizontal: x(20),
+              marginBottom: y(18),
+              paddingVertical: y(22),
+            }}
+          >
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: s(12), fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Total payout
+            </Text>
+            <Text style={{ color: '#ffffff', fontSize: s(36), fontWeight: '900', letterSpacing: -1, marginTop: y(4) }}>
+              {money(selectedTotal)}
+            </Text>
+            <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: s(13), fontWeight: '600', marginTop: y(4) }}>
+              {selectedItems.length} recipient{selectedItems.length === 1 ? '' : 's'} · {selectedTeam?.name}
+            </Text>
+          </View>
+
+          <ScrollView
+            contentContainerStyle={{ gap: y(8), paddingHorizontal: x(20), paddingBottom: y(120) }}
+            showsVerticalScrollIndicator={false}
+          >
+            {selectedItems.map((item) => (
+              <View
+                key={item.payout_approval_id}
+                style={{
+                  backgroundColor: '#f8f9f3',
+                  borderColor: '#eceee7',
+                  borderRadius: s(18),
+                  borderWidth: 1,
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  paddingHorizontal: x(16),
+                  paddingVertical: y(14),
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text selectable style={{ color: palette.ink, fontSize: s(15), fontWeight: '800' }}>
+                    {item.member_name}
+                  </Text>
+                  <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '600', marginTop: 2 }}>
+                    {item.task_title}
+                  </Text>
+                  <Text selectable style={{ color: '#a0a59d', fontSize: s(11), fontWeight: '700', marginTop: 3 }}>
+                    {item.bank_name} · {item.account_number}
+                  </Text>
+                </View>
+                <Text selectable style={{ color: palette.ink, fontSize: s(16), fontWeight: '900', letterSpacing: -0.3 }}>
+                  {money(parseAmt(amountDrafts[item.payout_approval_id] ?? '0'))}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+
+          <View
+            style={{
+              backgroundColor: palette.paper,
+              borderTopColor: '#eceee7',
+              borderTopWidth: 1,
+              bottom: 0,
+              left: 0,
+              paddingBottom: y(32),
+              paddingHorizontal: x(20),
+              paddingTop: y(14),
+              position: 'absolute',
+              right: 0,
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => { setPasscode(''); setPasscodeError(''); setStep('passcode'); }}
+              style={({ pressed }) => ({
+                alignItems: 'center',
+                backgroundColor: palette.ink,
+                borderRadius: 999,
+                height: s(54),
+                justifyContent: 'center',
+                opacity: pressed ? 0.78 : 1,
+              })}
+            >
+              <Text style={{ color: '#ffffff', fontSize: s(15), fontWeight: '900' }}>
+                Confirm with passcode
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Animated.View>
+    );
+  }
+
+  // ── passcode step ─────────────────────────────────────────────────────────
+  if (step === 'passcode') {
+    return (
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+          transform: [{ translateY: screenTranslate }],
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            backgroundColor: palette.paper,
+            justifyContent: 'center',
+            paddingHorizontal: x(32),
+          }}
+        >
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setStep('review')}
+            style={({ pressed }) => ({
+              alignItems: 'center',
+              backgroundColor: pressed ? '#e8ead3' : '#f0f1ea',
+              borderRadius: 999,
+              height: s(40),
+              justifyContent: 'center',
+              left: x(20),
+              position: 'absolute',
+              top: y(18),
+              width: s(40),
+            })}
+          >
+            <ArrowLeftIcon color={palette.ink} size={s(20)} strokeWidth={2.5} />
+          </Pressable>
+
+          <Text
+            selectable
+            style={{ color: palette.ink, fontSize: s(26), fontWeight: '900', letterSpacing: -0.7, textAlign: 'center' }}
+          >
+            Enter your passcode
+          </Text>
+          <Text
+            selectable
+            style={{ color: '#747a70', fontSize: s(14), fontWeight: '500', marginTop: y(8), textAlign: 'center', lineHeight: s(21) }}
+          >
+            Authorise payout of {money(selectedTotal)} to {selectedItems.length} crew member{selectedItems.length === 1 ? '' : 's'}.
+          </Text>
+
+          {/* Dot display */}
+          <View style={{ flexDirection: 'row', gap: x(14), marginTop: y(32), marginBottom: y(8) }}>
+            {[0, 1, 2, 3].map((i) => (
+              <View
+                key={i}
+                style={{
+                  backgroundColor: i < passcode.length ? palette.ink : '#dfe2da',
+                  borderRadius: 999,
+                  height: s(14),
+                  width: s(14),
+                }}
+              />
+            ))}
+          </View>
+
+          {passcodeError ? (
+            <Text style={{ color: '#e05252', fontSize: s(13), fontWeight: '700', marginBottom: y(8), textAlign: 'center' }}>
+              {passcodeError}
+            </Text>
+          ) : (
+            <View style={{ height: s(20) + y(8) }} />
+          )}
+
+          {/* Numpad */}
+          <View style={{ gap: y(10), width: '100%' }}>
+            {[['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['', '0', '⌫']].map((row, ri) => (
+              <View key={ri} style={{ flexDirection: 'row', gap: x(10) }}>
+                {row.map((digit) => (
+                  <Pressable
+                    key={digit}
+                    accessibilityRole="button"
+                    disabled={reserving}
+                    onPress={() => {
+                      if (digit === '⌫') {
+                        setPasscode((p) => p.slice(0, -1));
+                        setPasscodeError('');
+                      } else if (digit === '') {
+                        // spacer
+                      } else if (passcode.length < 4) {
+                        const next = passcode + digit;
+                        setPasscode(next);
+                        setPasscodeError('');
+                      }
+                    }}
+                    style={({ pressed }) => ({
+                      alignItems: 'center',
+                      backgroundColor:
+                        digit === ''
+                          ? 'transparent'
+                          : pressed
+                          ? '#e0e2d8'
+                          : '#f0f1ea',
+                      borderRadius: s(18),
+                      flex: 1,
+                      height: s(60),
+                      justifyContent: 'center',
+                      opacity: reserving ? 0.5 : 1,
+                    })}
+                  >
+                    <Text
+                      style={{
+                        color: palette.ink,
+                        fontSize: s(22),
+                        fontWeight: '900',
+                      }}
+                    >
+                      {digit}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ))}
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            disabled={reserving || passcode.length !== 4}
+            onPress={handleConfirmPasscode}
+            style={({ pressed }) => ({
+              alignItems: 'center',
+              backgroundColor: passcode.length === 4 ? palette.ink : '#d8dbd2',
+              borderRadius: 999,
+              height: s(54),
+              justifyContent: 'center',
+              marginTop: y(18),
+              opacity: pressed ? 0.78 : 1,
+              width: '100%',
             })}
           >
             <Text
-              selectable
               style={{
-                color: '#ffffff',
-                fontSize: appFontSize(s, 22),
+                color: passcode.length === 4 ? '#ffffff' : '#747a70',
+                fontSize: s(15),
                 fontWeight: '900',
-                letterSpacing: -0.4,
               }}
             >
-              Done
+              {reserving ? 'Processing...' : 'Confirm & pay crew'}
             </Text>
           </Pressable>
         </View>
-      </View>
+      </Animated.View>
+    );
+  }
+
+  // ── done step ─────────────────────────────────────────────────────────────
+  if (step === 'done') {
+    return (
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+          transform: [{ translateY: screenTranslate }],
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            backgroundColor: palette.paper,
+            justifyContent: 'center',
+            paddingHorizontal: x(32),
+          }}
+        >
+          <View
+            style={{
+              alignItems: 'center',
+              backgroundColor: palette.green,
+              borderRadius: 999,
+              height: s(80),
+              justifyContent: 'center',
+              marginBottom: y(24),
+              width: s(80),
+            }}
+          >
+            <Text style={{ fontSize: s(36) }}>✓</Text>
+          </View>
+          <Text
+            selectable
+            style={{ color: palette.ink, fontSize: s(28), fontWeight: '900', letterSpacing: -0.7, textAlign: 'center' }}
+          >
+            Payouts reserved!
+          </Text>
+          <Text
+            selectable
+            style={{
+              color: '#747a70',
+              fontSize: s(15),
+              fontWeight: '500',
+              lineHeight: s(22),
+              marginTop: y(10),
+              textAlign: 'center',
+            }}
+          >
+            {reservedBatch
+              ? `${money(reservedBatch.totalNaira)} for ${reservedBatch.itemCount} payout${reservedBatch.itemCount === 1 ? '' : 's'} has been reserved and queued for Flutterwave transfer.`
+              : 'Your payouts have been reserved and queued for Flutterwave transfer.'}
+          </Text>
+          <Text
+            selectable
+            style={{
+              color: '#a0a59d',
+              fontSize: s(13),
+              fontWeight: '600',
+              lineHeight: s(19),
+              marginTop: y(10),
+              textAlign: 'center',
+            }}
+          >
+            Funds are locked from the wallet. Crew members will receive bank transfers as Flutterwave processes the batch.
+          </Text>
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={onBack}
+            style={({ pressed }) => ({
+              alignItems: 'center',
+              backgroundColor: palette.ink,
+              borderRadius: 999,
+              height: s(54),
+              justifyContent: 'center',
+              marginTop: y(40),
+              opacity: pressed ? 0.78 : 1,
+              width: '100%',
+            })}
+          >
+            <Text style={{ color: '#ffffff', fontSize: s(15), fontWeight: '900' }}>Done</Text>
+          </Pressable>
+        </View>
+      </Animated.View>
     );
   }
 
