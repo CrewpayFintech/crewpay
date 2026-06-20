@@ -23,6 +23,7 @@ export type CreateTeamInput = {
   category: string;
   categoryPreset: string;
   customCategory: string;
+  description?: string;
   id?: string;
   joinRule: string;
   location: string;

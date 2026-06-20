@@ -20540,47 +20540,60 @@ function appFontSize(s: (value: number) => number, value: number) {
   return Math.max(scaled + minimumLift, Math.round(scaled * 1.08));
 }
 
-function ArrowLeftIcon({ scale }: { scale: number }) {
+function ArrowLeftIcon({
+  color = palette.greenDeep,
+  scale,
+  size,
+  style,
+}: {
+  color?: string;
+  scale?: number;
+  size?: number;
+  strokeWidth?: number;
+  style?: ViewStyle;
+}) {
+  const iconScale = scale ?? (size ? size / 26 : 1);
   return (
     <View
       style={{
-        height: sFor(scale, 26),
-        width: sFor(scale, 30),
+        height: sFor(iconScale, 26),
+        width: sFor(iconScale, 30),
+        ...(style as object),
       }}
     >
       <View
         style={{
-          backgroundColor: palette.greenDeep,
+          backgroundColor: color,
           borderRadius: 999,
-          height: sFor(scale, 3),
-          left: sFor(scale, 2),
+          height: sFor(iconScale, 3),
+          left: sFor(iconScale, 2),
           position: 'absolute',
-          top: sFor(scale, 12),
-          width: sFor(scale, 25),
+          top: sFor(iconScale, 12),
+          width: sFor(iconScale, 25),
         }}
       />
       <View
         style={{
-          backgroundColor: palette.greenDeep,
+          backgroundColor: color,
           borderRadius: 999,
-          height: sFor(scale, 3),
-          left: sFor(scale, 1),
+          height: sFor(iconScale, 3),
+          left: sFor(iconScale, 1),
           position: 'absolute',
-          top: sFor(scale, 7),
+          top: sFor(iconScale, 7),
           transform: [{ rotate: '-42deg' }],
-          width: sFor(scale, 15),
+          width: sFor(iconScale, 15),
         }}
       />
       <View
         style={{
-          backgroundColor: palette.greenDeep,
+          backgroundColor: color,
           borderRadius: 999,
-          height: sFor(scale, 3),
-          left: sFor(scale, 1),
+          height: sFor(iconScale, 3),
+          left: sFor(iconScale, 1),
           position: 'absolute',
-          top: sFor(scale, 17),
+          top: sFor(iconScale, 17),
           transform: [{ rotate: '42deg' }],
-          width: sFor(scale, 15),
+          width: sFor(iconScale, 15),
         }}
       />
     </View>
