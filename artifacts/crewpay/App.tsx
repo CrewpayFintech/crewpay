@@ -859,16 +859,18 @@ export default function App() {
 
   useEffect(() => {
     const subscription = Linking.addEventListener('url', ({ url }) => {
-      handleIncomingUrl(url);
+      void handleIncomingUrl(url);
     });
 
-    Linking.getInitialURL()
-      .then((url) => {
-        if (url) {
-          handleIncomingUrl(url);
-        }
-      })
-      .catch(() => undefined);
+    if (Platform.OS !== 'web') {
+      Linking.getInitialURL()
+        .then((url) => {
+          if (url) {
+            void handleIncomingUrl(url);
+          }
+        })
+        .catch(() => undefined);
+    }
 
     return () => {
       subscription.remove();
@@ -1685,7 +1687,11 @@ export default function App() {
         <PendingInvitePrompt
           invite={pendingInvite}
           onCancel={() => {
-            persistPendingInvite(null);
+            void persistPendingInvite(null);
+
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              window.history.replaceState({}, '', '/');
+            }
           }}
           onJoin={async () => {
             const result = await joinTeamWithInvite(pendingInvite.token);
@@ -1694,10 +1700,13 @@ export default function App() {
             if (signedInUserId) {
               await persistPreferredRole(signedInUserId, 'crewmate');
             }
-            await refreshTeamsFromBackend();
-            await refreshTasksFromBackend();
-            await refreshMyJoinRequestStatuses();
-            await refreshMySubmissionsFromBackend();
+
+            void Promise.allSettled([
+              refreshTeamsFromBackend(),
+              refreshTasksFromBackend(),
+              refreshMyJoinRequestStatuses(),
+              refreshMySubmissionsFromBackend(),
+            ]);
 
             return result;
           }}
@@ -5816,6 +5825,7 @@ function PendingInvitePrompt({
 
   return (
     <View
+      pointerEvents="box-none"
       style={{
         bottom: 0,
         elevation: 80,
@@ -5850,6 +5860,7 @@ function PendingInvitePrompt({
         }}
       />
       <View
+        pointerEvents="auto"
         style={{
           backgroundColor: '#ffffff',
           borderColor: '#edf0e8',
@@ -5916,6 +5927,7 @@ function PendingInvitePrompt({
             </Text>
           </View>
           <Pressable
+            accessibilityLabel="Close team invite"
             accessibilityRole="button"
             onPress={onCancel}
             style={({ pressed }) => ({
@@ -5965,6 +5977,7 @@ function PendingInvitePrompt({
         <View style={{ flexDirection: 'row', gap: x(10), marginTop: y(22) }}>
           {!result ? (
             <Pressable
+              accessibilityLabel="Cancel team invite"
               accessibilityRole="button"
               disabled={joining}
               onPress={onCancel}
@@ -5979,7 +5992,6 @@ function PendingInvitePrompt({
               })}
             >
               <Text
-                selectable
                 style={{
                   color: '#11130f',
                   fontSize: appFontSize(s, 16),
@@ -5992,6 +6004,7 @@ function PendingInvitePrompt({
             </Pressable>
           ) : null}
           <Pressable
+            accessibilityLabel={result ? 'Go to CrewPay home' : 'Join team'}
             accessibilityRole="button"
             disabled={joining}
             onPress={submitJoin}
@@ -6007,7 +6020,6 @@ function PendingInvitePrompt({
             })}
           >
             <Text
-              selectable
               style={{
                 color: '#11130f',
                 fontSize: appFontSize(s, 16),
@@ -10637,9 +10649,9 @@ function TeamDetailScreen({
         team.id,
         team.joinRule === 'Invite only' ? 'auto_join' : 'request',
       );
-      const joinLink = `https://crewpay.online/join-team/${invite.token}?team=${encodeURIComponent(
-        team.name,
-      )}`;
+      const joinLink = `https://crewpay.online/?invite=${encodeURIComponent(
+        invite.token,
+      )}&team=${encodeURIComponent(team.name)}`;
 
       await Share.share({
         message: `Join ${team.name} on CrewPay.\n\n${joinLink}\n\nInvite code: ${invite.token}`,
