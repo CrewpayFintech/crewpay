@@ -475,6 +475,7 @@ export default function App() {
       try {
         let profile = await getMyProfile();
         const user = await getCurrentUser();
+        const hasPasscode = user ? await hasLocalPasscode(user.id) : false;
         const activePendingInvite = pendingInvite ?? (await loadStoredPendingInvite());
         const preferredRole = user?.id ? await loadPreferredRole(user.id) : null;
         const nextRole: AccountRole = activePendingInvite
@@ -511,7 +512,7 @@ export default function App() {
           return;
         }
 
-        if (options?.requirePasscode && user && (await hasLocalPasscode(user.id))) {
+        if (options?.requirePasscode && user && hasPasscode) {
           setUnlockCode('');
           setUnlockError('');
           setScreen('passcode-lock');

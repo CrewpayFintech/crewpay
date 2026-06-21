@@ -111,6 +111,38 @@ async function clearLegacyPasscode(userId: string) {
   ]);
 }
 
+async function migrateLegacyPasscode(userId: string) {
+  const { data, error } = await supabase.rpc('has_my_passcode');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (data) {
+    await clearLegacyPasscode(userId);
+    return true;
+  }
+
+  const legacyPasscode = await AsyncStorage.getItem(
+    secureKey(legacyPasscodePrefix, userId),
+  );
+
+  if (!/^\d{4}$/.test(legacyPasscode ?? '')) {
+    return false;
+  }
+
+  const saveResult = await supabase.rpc('set_my_passcode', {
+    p_passcode: legacyPasscode,
+  });
+
+  if (saveResult.error) {
+    throw new Error(saveResult.error.message);
+  }
+
+  await clearLegacyPasscode(userId);
+  return true;
+}
+
 export async function saveLocalPasscode(userId: string, passcode: string) {
   if (!/^\d{4}$/.test(passcode)) {
     throw new Error('Passcode must be 4 digits.');
@@ -128,27 +160,7 @@ export async function saveLocalPasscode(userId: string, passcode: string) {
 }
 
 export async function hasLocalPasscode(userId: string) {
-  const { data, error } = await supabase.rpc('has_my_passcode');
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if (data) {
-    await clearLegacyPasscode(userId);
-    return true;
-  }
-
-  const legacyPasscode = await AsyncStorage.getItem(
-    secureKey(legacyPasscodePrefix, userId),
-  );
-
-  if (/^\d{4}$/.test(legacyPasscode ?? '')) {
-    await saveLocalPasscode(userId, legacyPasscode!);
-    return true;
-  }
-
-  return false;
+  return migrateLegacyPasscode(userId);
 }
 
 export type PasscodeVerificationResult = {
@@ -163,6 +175,12 @@ export async function verifyLocalPasscode(
 ): Promise<PasscodeVerificationResult> {
   if (!/^\d{4}$/.test(passcode)) {
     return { attemptsRemaining: 0, ok: false };
+  }
+
+  const hasPasscode = await migrateLegacyPasscode(userId);
+
+  if (!hasPasscode) {
+    return { attemptsRemaining: maxPasscodeAttempts, ok: false };
   }
 
   const { data, error } = await supabase.rpc('verify_my_passcode', {
