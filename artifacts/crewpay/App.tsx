@@ -12363,20 +12363,23 @@ function SubmitProofScreen({
   const [locationAsset, setLocationAsset] = useState<SubmissionAsset | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const latestSubmission = existingSubmissions[0] ?? null;
-  const needsText = proofTypes.includes('text');
   const selectedKinds = new Set<SubmissionAssetKind>([
     ...selectedAssets.map((asset) => asset.kind),
     ...(locationAsset ? [locationAsset.kind] : []),
   ]);
-  const missingProofs = proofTypes.filter((proofType) => {
-    if (proofType === 'none' || proofType === 'text') {
-      return false;
-    }
-
-    return !selectedKinds.has(proofType as SubmissionAssetKind);
-  });
-  const textReady = !needsText || proofText.trim().length >= 2;
-  const canSubmit = !submitting && textReady && missingProofs.length === 0;
+  const allowsNoProof = proofTypes.includes('none');
+  const hasTextProof =
+    proofTypes.includes('text') && proofText.trim().length >= 2;
+  const hasAssetProof = proofTypes.some(
+    (proofType) =>
+      proofType !== 'none' &&
+      proofType !== 'text' &&
+      selectedKinds.has(proofType as SubmissionAssetKind),
+  );
+  const hasAcceptedProof = allowsNoProof || hasTextProof || hasAssetProof;
+  const textIsOnlyProof =
+    proofTypes.length === 1 && proofTypes[0] === 'text';
+  const canSubmit = !submitting && hasAcceptedProof;
 
   const addMediaAssets = useCallback(
     async (kind: Extract<SubmissionAssetKind, 'photo' | 'video'>) => {
@@ -12476,9 +12479,7 @@ function SubmitProofScreen({
     if (!canSubmit) {
       Alert.alert(
         'Proof is incomplete',
-        needsText && !textReady
-          ? 'Add a short written proof before submitting.'
-          : `Attach ${formatTaskProofs(missingProofs)} before submitting.`,
+        `Add any one accepted proof: ${formatTaskProofs(proofTypes)}.`,
       );
       return;
     }
@@ -12520,14 +12521,11 @@ function SubmitProofScreen({
   }, [
     canSubmit,
     locationAsset,
-    missingProofs,
-    needsText,
     onSubmitted,
     proofText,
     selectedAssets,
     task.id,
     team.id,
-    textReady,
   ]);
 
   return (
@@ -12639,7 +12637,7 @@ function SubmitProofScreen({
                   lineHeight: s(22),
                 }}
               >
-                Required proof
+                Choose a proof method
               </Text>
               <View
                 style={{
@@ -12654,11 +12652,12 @@ function SubmitProofScreen({
                     key={proofType}
                     style={{
                       backgroundColor:
-                        proofType === 'none' || proofType === 'text'
-                          ? '#f0f1eb'
-                          : selectedKinds.has(proofType as SubmissionAssetKind)
-                            ? palette.green
-                            : '#f0f1eb',
+                        proofType === 'none' ||
+                        (proofType === 'text' && hasTextProof) ||
+                        (proofType !== 'text' &&
+                          selectedKinds.has(proofType as SubmissionAssetKind))
+                          ? palette.green
+                          : '#f0f1eb',
                       borderRadius: 999,
                       paddingHorizontal: s(12),
                       paddingVertical: y(7),
@@ -12688,6 +12687,18 @@ function SubmitProofScreen({
                   marginTop: y(11),
                 }}
               >
+                Submit any one of the accepted methods above.
+              </Text>
+              <Text
+                selectable
+                style={{
+                  color: '#747a70',
+                  fontSize: appFontSize(s, 13),
+                  fontWeight: '500',
+                  lineHeight: s(20),
+                  marginTop: y(6),
+                }}
+              >
                 {task.success_criteria}
               </Text>
             </View>
@@ -12703,7 +12714,12 @@ function SubmitProofScreen({
                   lineHeight: s(21),
                 }}
               >
-                Written note {needsText ? '' : '(optional)'}
+                Written note{' '}
+                {textIsOnlyProof
+                  ? ''
+                  : proofTypes.includes('text')
+                    ? '(one option)'
+                    : '(optional context)'}
               </Text>
               <TextInput
                 multiline
@@ -12713,7 +12729,7 @@ function SubmitProofScreen({
                 style={{
                   backgroundColor: '#fbfcf8',
                   borderColor:
-                    needsText && !textReady && proofText.length > 0
+                    textIsOnlyProof && !hasTextProof && proofText.length > 0
                       ? '#b23a2c'
                       : '#c9cbc4',
                   borderRadius: s(18),
