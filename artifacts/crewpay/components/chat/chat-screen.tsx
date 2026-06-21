@@ -42,6 +42,7 @@ import { palette } from '../../constants/theme';
 import { formatRequestTime, getErrorMessage } from '../../utils/app-helpers';
 
 type ChatScreenProps = {
+  allowedTeamIds: string[];
   onBack: () => void;
 };
 
@@ -87,7 +88,7 @@ function formatReplyBody(message: ChatMessage, body: string) {
   return `Replying to ${message.sender_name}: "${excerpt}"\n${body}`;
 }
 
-export function ChatScreen({ onBack }: ChatScreenProps) {
+export function ChatScreen({ allowedTeamIds, onBack }: ChatScreenProps) {
   const { width, height } = useWindowDimensions();
   const widthScale = width / 624;
   const heightScale = height / 1239;
@@ -111,24 +112,36 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
   const [sending, setSending] = useState(false);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
+  const allowedTeamIdSet = useMemo(
+    () => new Set(allowedTeamIds),
+    [allowedTeamIds],
+  );
+  const roleConversations = useMemo(
+    () =>
+      conversations.filter((conversation) =>
+        allowedTeamIdSet.has(conversation.team_id),
+      ),
+    [allowedTeamIdSet, conversations],
+  );
+
   // ── Dedup: track which profile IDs already have a DM conversation ─────────
   const directConversationProfileIds = useMemo(() => {
     return new Set(
-      conversations
+      roleConversations
         .filter((c) => c.conversation_type === 'direct' && c.other_profile_id)
         .map((c) => c.other_profile_id ?? ''),
     );
-  }, [conversations]);
+  }, [roleConversations]);
 
   const teamConversations = useMemo(
-    () => conversations.filter((c) => c.conversation_type === 'team'),
-    [conversations],
+    () => roleConversations.filter((c) => c.conversation_type === 'team'),
+    [roleConversations],
   );
 
   // Show only the most recent DM per person (no duplicate DMs from same user across teams)
   const directConversations = useMemo(() => {
     const seen = new Set<string>();
-    return conversations
+    return roleConversations
       .filter((c) => c.conversation_type === 'direct')
       .sort((a, b) => {
         if (!a.last_message_at && !b.last_message_at) return 0;
@@ -145,15 +158,17 @@ export function ChatScreen({ onBack }: ChatScreenProps) {
         seen.add(key);
         return true;
       });
-  }, [conversations]);
+  }, [roleConversations]);
 
   // Only show targets that don't already have a DM conversation (dedup by profile_id)
   const freshTargets = useMemo(
     () =>
       targets.filter(
-        (target) => !directConversationProfileIds.has(target.profile_id),
+        (target) =>
+          allowedTeamIdSet.has(target.team_id) &&
+          !directConversationProfileIds.has(target.profile_id),
       ),
-    [directConversationProfileIds, targets],
+    [allowedTeamIdSet, directConversationProfileIds, targets],
   );
 
   const loadChatHome = useCallback(async () => {

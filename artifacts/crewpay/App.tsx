@@ -356,7 +356,7 @@ export default function App() {
   const visibleTeams = useMemo(() => {
     const roleScopedTeams = availableTeams.filter((team) => {
       if (selectedRole === 'crewmate') {
-        return team.memberRole === 'member';
+        return team.memberRole === 'member' || team.memberRole === 'admin';
       }
 
       return team.memberRole === 'owner' || team.memberRole === 'admin';
@@ -1723,7 +1723,12 @@ export default function App() {
             zIndex: 6,
           }}
         >
-          <ChatScreen onBack={() => setScreen('home')} />
+          <ChatScreen
+            allowedTeamIds={visibleTeams
+              .map((team) => team.id)
+              .filter((teamId): teamId is string => Boolean(teamId))}
+            onBack={() => setScreen('home')}
+          />
         </View>
       ) : null}
       {screen === 'create-task' ? (
@@ -5824,16 +5829,23 @@ function PendingInvitePrompt({
   }, [onCancel, onJoin, result]);
 
   return (
-    <View
-      pointerEvents="box-none"
-      style={{
+    <Modal
+      animationType="fade"
+      onRequestClose={onCancel}
+      presentationStyle="overFullScreen"
+      statusBarTranslucent
+      transparent
+      visible
+    >
+      <View
+        style={{
+        backgroundColor: 'transparent',
         bottom: 0,
-        elevation: 80,
+        flex: 1,
         left: 0,
         position: 'absolute',
         right: 0,
         top: 0,
-        zIndex: 4000,
       }}
     >
       <BlurView
@@ -6032,7 +6044,8 @@ function PendingInvitePrompt({
           </Pressable>
         </View>
       </View>
-    </View>
+      </View>
+    </Modal>
   );
 }
 
