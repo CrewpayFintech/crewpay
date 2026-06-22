@@ -1602,11 +1602,18 @@ export default function App() {
             }
             role={selectedRole}
             onEditPayoutInfo={() => setScreen('edit-bank')}
-            submissionCount={myTaskSubmissions.length}
+            submissionCount={
+              selectedRole === 'crewlead'
+                ? Object.values(teamTaskSubmissionsByTeamId).reduce(
+                    (total, submissions) => total + submissions.length,
+                    0,
+                  )
+                : myTaskSubmissions.length
+            }
             syncError={syncError}
             syncStatus={syncStatus}
-            taskCount={createdTasks.length}
-            teamCount={availableTeams.length}
+            taskCount={visibleTasks.length}
+            teamCount={visibleTeams.length}
           />
         </View>
       ) : null}
@@ -7657,501 +7664,544 @@ function HomeScreen({
   }, [handleWalletDepositReturn, isCrewMate, refreshWallet]);
 
   return (
-    <View style={{ backgroundColor: '#f8f9f4', flex: 1 }}>
+    <View style={{ backgroundColor: '#ffffff', flex: 1, overflow: 'hidden' }}>
       <StatusBar style="dark" />
+      <Text
+        selectable
+        style={{
+          color: '#050505',
+          fontSize: appFontSize(s, 24),
+          fontWeight: '800',
+          left: x(63),
+          letterSpacing: -0.35,
+          lineHeight: s(30),
+          position: 'absolute',
+          top: y(86),
+        }}
+      >
+        {isCrewMate ? 'CrewMate' : 'CrewLead'}
+      </Text>
+      <Pressable
+        accessibilityLabel={`Switch to ${isCrewMate ? 'CrewLead' : 'CrewMate'}`}
+        accessibilityRole="button"
+        onPress={onSwitchRole}
+        style={({ pressed }) => ({
+          alignItems: 'center',
+          backgroundColor: '#f4f5f1',
+          borderRadius: 999,
+          height: s(42),
+          justifyContent: 'center',
+          opacity: pressed ? 0.55 : 1,
+          position: 'absolute',
+          right: x(108),
+          top: y(82),
+          transform: [{ scale: pressed ? 0.96 : 1 }],
+          width: s(42),
+        })}
+      >
+        <ArrowLeftRight color="#050505" size={s(22)} strokeWidth={3} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onOpenNotifications}
+        style={({ pressed }) => ({
+          alignItems: 'center',
+          height: s(42),
+          justifyContent: 'center',
+          opacity: pressed ? 0.55 : 1,
+          position: 'absolute',
+          right: x(58),
+          top: y(82),
+          width: s(42),
+        })}
+      >
+        <Bell color="#050505" size={s(25)} strokeWidth={3} />
+        {pendingRequestCount > 0 ? (
+          <View
+            style={{
+              alignItems: 'center',
+              backgroundColor: palette.green,
+              borderColor: '#ffffff',
+              borderRadius: 999,
+              borderWidth: 2,
+              height: s(19),
+              justifyContent: 'center',
+              position: 'absolute',
+              right: s(0),
+              top: s(0),
+              width: s(19),
+            }}
+          >
+            <Text
+              selectable
+              style={{
+                color: palette.ink,
+                fontSize: appFontSize(s, 10),
+                fontWeight: '900',
+                lineHeight: s(13),
+              }}
+            >
+              {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
 
-      {activeTab === 'home' ? (
-        <ScrollView
-          contentContainerStyle={{
-            paddingBottom: y(120),
-            paddingHorizontal: x(20),
-            paddingTop: y(60),
-          }}
-          showsVerticalScrollIndicator={false}
+      {showSyncBanner ? (
+        <Pressable
+          accessibilityRole={syncError ? 'button' : undefined}
+          disabled={!syncError}
+          onPress={syncError ? onRetrySync : undefined}
+          style={({ pressed }) => ({
+            alignItems: 'center',
+            backgroundColor: syncError ? '#fff7df' : '#f4f5f1',
+            borderColor: syncError ? '#efd99a' : '#eceee7',
+            borderRadius: 999,
+            borderWidth: 1,
+            flexDirection: 'row',
+            left: x(63),
+            minHeight: s(36),
+            opacity: pressed ? 0.72 : 1,
+            paddingHorizontal: x(12),
+            position: 'absolute',
+            right: x(63),
+            top: y(122),
+            zIndex: 3,
+          })}
         >
-          {/* ── Header row ── */}
-          <View style={{ alignItems: 'center', flexDirection: 'row', marginBottom: y(20) }}>
+          <View
+            style={{
+              backgroundColor: syncError ? '#d7a600' : palette.green,
+              borderRadius: 999,
+              height: s(8),
+              marginRight: x(8),
+              width: s(8),
+            }}
+          />
+          <Text
+            selectable
+            numberOfLines={1}
+            style={{
+              color: syncError ? '#6f5500' : '#747a70',
+              flex: 1,
+              fontSize: appFontSize(s, 12),
+              fontWeight: '800',
+              letterSpacing: -0.05,
+              lineHeight: s(16),
+            }}
+          >
+            {syncError || 'Syncing latest workspace...'}
+          </Text>
+          {syncError ? (
+            <Text
+              selectable
+              style={{
+                color: palette.greenDeep,
+                fontSize: appFontSize(s, 12),
+                fontWeight: '900',
+                lineHeight: s(16),
+                marginLeft: x(8),
+              }}
+            >
+              Retry
+            </Text>
+          ) : null}
+        </Pressable>
+      ) : null}
+
+      <View
+        style={{
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: x(8),
+          left: x(63),
+          position: 'absolute',
+          top: y(160),
+        }}
+      >
+        <Text
+          selectable
+          style={{
+            color: '#b5b7b9',
+            fontSize: appFontSize(s, 20),
+            fontWeight: '700',
+            lineHeight: s(25),
+          }}
+        >
+          {isCrewMate ? 'Task workspace' : 'Total Balance'}
+        </Text>
+        <View
+          style={{
+            alignItems: 'center',
+            backgroundColor: walletHealthColor,
+            borderRadius: s(4),
+            display: isCrewMate ? 'none' : 'flex',
+            height: s(18),
+            justifyContent: 'center',
+            width: s(18),
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: '#ffffff',
+              borderBottomWidth: Math.max(1.6, s(2)),
+              borderColor: '#ffffff',
+              borderRightWidth: Math.max(1.6, s(2)),
+              height: s(7),
+              transform: [{ rotate: '-45deg' }],
+              width: s(7),
+            }}
+          />
+        </View>
+        <Text
+          selectable
+          style={{
+            color: isCrewMate ? '#b5b7b9' : walletHealthColor,
+            fontSize: appFontSize(s, 18),
+            fontWeight: '800',
+            lineHeight: s(23),
+          }}
+        >
+          {isCrewMate ? 'Ready' : `${walletHealthPercent}%`}
+        </Text>
+      </View>
+
+      <View
+        style={{
+          alignItems: 'flex-end',
+          display: isCrewMate ? 'none' : 'flex',
+          flexDirection: 'row',
+          left: x(63),
+          position: 'absolute',
+          top: y(193),
+        }}
+      >
+        <Text
+          selectable
+          style={{
+            color: '#000000',
+            fontSize: appFontSize(s, 61),
+            fontWeight: '900',
+            letterSpacing: -2.4,
+            lineHeight: s(70),
+          }}
+        >
+          {nairaSymbol}
+          {formatNairaWhole(walletBalance)}
+        </Text>
+        <Text
+          selectable
+          style={{
+            color: '#b9bbbd',
+            fontSize: appFontSize(s, 61),
+            fontWeight: '900',
+            letterSpacing: -2.4,
+            lineHeight: s(70),
+          }}
+        >
+          .{walletBalanceParts[1] ?? '00'}
+        </Text>
+      </View>
+
+      <View
+        style={{
+          alignItems: 'flex-end',
+          display: 'none',
+          flexDirection: 'row',
+          left: x(63),
+          position: 'absolute',
+          top: y(193),
+        }}
+      >
+        <Text
+          selectable
+          style={{
+            color: '#000000',
+            fontSize: appFontSize(s, 61),
+            fontWeight: '900',
+            letterSpacing: -2.4,
+            lineHeight: s(70),
+          }}
+        >
+          ₦0
+        </Text>
+        <Text
+          selectable
+          style={{
+            color: '#b9bbbd',
+            fontSize: appFontSize(s, 61),
+            fontWeight: '900',
+            letterSpacing: -2.4,
+            lineHeight: s(70),
+          }}
+        >
+          .00
+        </Text>
+      </View>
+
+      <View
+        style={{
+          alignItems: 'center',
+          left: x(108),
+          position: 'absolute',
+          right: x(108),
+          top: y(isCrewMate ? 211 : 292),
+        }}
+      >
+        <Text
+          selectable
+          style={{
+            color: '#050505',
+            fontSize: appFontSize(s, 22),
+            fontWeight: '900',
+            letterSpacing: -0.25,
+            lineHeight: s(28),
+            textAlign: 'center',
+          }}
+        >
+          {isCrewMate ? 'No active tasks yet' : 'There is nothing here yet'}
+        </Text>
+        <Text
+          selectable
+          style={{
+            color: '#b5b7b9',
+            fontSize: appFontSize(s, 19),
+            fontWeight: '700',
+            lineHeight: s(24),
+            marginTop: y(6),
+            textAlign: 'center',
+          }}
+        >
+          {isCrewMate
+            ? 'Join a team to see assigned tasks and submit proof for approval'
+            : 'Create tasks, build teams, and review work from your CrewPay wallet'}
+        </Text>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        onPress={() =>
+          isCrewMate ? openAction('join-team') : setAddMoneyOpen(true)
+        }
+        style={({ pressed }) => ({
+          alignItems: 'center',
+          backgroundColor: palette.green,
+          borderRadius: 999,
+          flexDirection: 'row',
+          gap: x(11),
+          height: y(54),
+          justifyContent: 'center',
+          left: Math.round((width - s(188)) / 2),
+          opacity: pressed ? 0.84 : 1,
+          position: 'absolute',
+          top: y(392),
+          transform: [{ scale: pressed ? 0.97 : 1 }],
+          width: s(188),
+        })}
+      >
+        <View
+          style={{
+            alignItems: 'center',
+            backgroundColor: '#ffffff',
+            borderRadius: 999,
+            height: s(23),
+            justifyContent: 'center',
+            width: s(23),
+          }}
+        >
+          <ArrowDown color="#000000" size={s(15)} strokeWidth={4} />
+        </View>
+        <Text
+          selectable
+          style={{
+            color: palette.ink,
+            fontSize: appFontSize(s, 18),
+            fontWeight: '800',
+            letterSpacing: -0.15,
+          }}
+        >
+          {isCrewMate ? 'Join team' : 'Add money'}
+        </Text>
+      </Pressable>
+
+      <View
+        style={{
+          alignItems: 'center',
+          flexDirection: 'row',
+          justifyContent: 'center',
+          left: gridLeft,
+          position: 'absolute',
+          top: y(462),
+          width: gridWidth,
+        }}
+      >
+        <HomeCountLink
+          count={teamCount}
+          label={teamCount === 1 ? 'Team' : 'Teams'}
+          onPress={onViewTeam}
+          s={s}
+          x={x}
+        />
+        <HomeCountDivider s={s} x={x} />
+        <HomeCountLink
+          count={taskCount}
+          label={taskCount === 1 ? 'Task' : 'Tasks'}
+          onPress={onViewTask}
+          s={s}
+          x={x}
+        />
+        <HomeCountDivider s={s} x={x} />
+        <HomeCountLink
+          count={submissionCount}
+          label={isCrewMate ? 'Submitted' : 'Reviews'}
+          onPress={onOpenSubmissions}
+          s={s}
+          x={x}
+        />
+      </View>
+
+      <View
+        style={{
+          gap: y(17),
+          left: gridLeft,
+          position: 'absolute',
+          top: y(500),
+          width: gridWidth,
+        }}
+      >
+        {actionRows.map((row, rowIndex) => (
+          <View
+            key={`home-action-row-${rowIndex}`}
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              width: gridWidth,
+            }}
+          >
+            {row.map((action) => (
+              <HomeActionCard
+                action={action}
+                height={cardHeight}
+                key={action.id}
+                onPress={() => openAction(action.id)}
+                s={s}
+                scale={scale}
+                width={cardWidth}
+                x={x}
+                y={y}
+              />
+            ))}
+          </View>
+        ))}
+      </View>
+
+      {!isCrewMate ? (
+        <HomeTransactionSection
+          loading={walletLoading}
+          onRefresh={refreshWallet}
+          onSeeAll={() => setTransactionsOpen(true)}
+          s={s}
+          transactions={walletTransactions.slice(0, 3)}
+          walletError={walletError}
+          x={x}
+          y={y}
+        />
+      ) : null}
+
+      {promoVisible && isCrewMate ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() =>
+            setWalletSlideIndex((index) => (index + 1) % activeSlides.length)
+          }
+          style={{
+            alignItems: 'center',
+            borderColor: '#eceff1',
+            borderRadius: s(25),
+            borderWidth: 1,
+            bottom: y(132),
+            flexDirection: 'row',
+            height: y(109),
+            left: gridLeft,
+            overflow: 'hidden',
+            paddingHorizontal: x(26),
+            position: 'absolute',
+            width: gridWidth,
+          }}
+        >
+          <View
+            style={{
+              alignItems: 'center',
+              backgroundColor: '#eaf3ff',
+              borderRadius: s(16),
+              height: s(49),
+              justifyContent: 'center',
+              marginRight: x(18),
+              width: s(49),
+            }}
+          >
+            <HomeActionIcon scale={scale} tone={activeWalletSlide.tone} />
+          </View>
+          <View style={{ flex: 1 }}>
             <Text
               selectable
               style={{
                 color: '#050505',
-                fontSize: appFontSize(s, 24),
+                fontSize: appFontSize(s, 20),
                 fontWeight: '900',
-                letterSpacing: -0.5,
-              }}
-            >
-              {isCrewMate ? 'CrewMate' : 'CrewLead'}
-            </Text>
-            <View style={{ flex: 1 }} />
-            <Pressable
-              accessibilityLabel={`Switch to ${isCrewMate ? 'CrewLead' : 'CrewMate'}`}
-              accessibilityRole="button"
-              onPress={onSwitchRole}
-              style={({ pressed }) => ({
-                alignItems: 'center',
-                backgroundColor: pressed ? '#e8ead3' : '#f4f5f1',
-                borderRadius: 999,
-                height: s(40),
-                justifyContent: 'center',
-                marginRight: x(8),
-                opacity: pressed ? 0.7 : 1,
-                transform: [{ scale: pressed ? 0.96 : 1 }],
-                width: s(40),
-              })}
-            >
-              <ArrowLeftRight color="#050505" size={s(20)} strokeWidth={2.8} />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onOpenNotifications}
-              style={({ pressed }) => ({
-                alignItems: 'center',
-                height: s(40),
-                justifyContent: 'center',
-                opacity: pressed ? 0.7 : 1,
-                width: s(40),
-              })}
-            >
-              <Bell color="#050505" size={s(22)} strokeWidth={2.8} />
-              {pendingRequestCount > 0 ? (
-                <View
-                  style={{
-                    alignItems: 'center',
-                    backgroundColor: palette.green,
-                    borderColor: '#f8f9f4',
-                    borderRadius: 999,
-                    borderWidth: 2,
-                    height: s(17),
-                    justifyContent: 'center',
-                    position: 'absolute',
-                    right: s(2),
-                    top: s(2),
-                    width: s(17),
-                  }}
-                >
-                  <Text
-                    selectable
-                    style={{
-                      color: palette.ink,
-                      fontSize: appFontSize(s, 9),
-                      fontWeight: '900',
-                    }}
-                  >
-                    {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-          </View>
-
-          {/* ── Sync banner ── */}
-          {showSyncBanner ? (
-            <Pressable
-              accessibilityRole={syncError ? 'button' : undefined}
-              disabled={!syncError}
-              onPress={syncError ? onRetrySync : undefined}
-              style={({ pressed }) => ({
-                alignItems: 'center',
-                backgroundColor: syncError ? '#fff7df' : '#f4f5f1',
-                borderColor: syncError ? '#efd99a' : '#eceee7',
-                borderRadius: 999,
-                borderWidth: 1,
-                flexDirection: 'row',
-                marginBottom: y(14),
-                minHeight: s(36),
-                opacity: pressed ? 0.72 : 1,
-                paddingHorizontal: x(12),
-              })}
-            >
-              <View
-                style={{
-                  backgroundColor: syncError ? '#d7a600' : palette.green,
-                  borderRadius: 999,
-                  height: s(8),
-                  marginRight: x(8),
-                  width: s(8),
-                }}
-              />
-              <Text
-                selectable
-                numberOfLines={1}
-                style={{
-                  color: syncError ? '#6f5500' : '#747a70',
-                  flex: 1,
-                  fontSize: appFontSize(s, 12),
-                  fontWeight: '800',
-                  letterSpacing: -0.05,
-                  lineHeight: s(16),
-                }}
-              >
-                {syncError || 'Syncing latest workspace...'}
-              </Text>
-              {syncError ? (
-                <Text
-                  selectable
-                  style={{
-                    color: palette.greenDeep,
-                    fontSize: appFontSize(s, 12),
-                    fontWeight: '900',
-                    lineHeight: s(16),
-                    marginLeft: x(8),
-                  }}
-                >
-                  Retry
-                </Text>
-              ) : null}
-            </Pressable>
-          ) : null}
-
-          {/* ── Balance / Workspace Card ── */}
-          <View
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: s(28),
-              elevation: 3,
-              marginBottom: y(14),
-              padding: s(24),
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.07,
-              shadowRadius: 12,
+                letterSpacing: -0.3,
+                lineHeight: s(25),
             }}
           >
-            {isCrewMate ? (
-              <View>
-                <View style={{ alignItems: 'center', flexDirection: 'row', gap: x(8) }}>
-                  <Text selectable style={{ color: '#b5b7b9', fontSize: appFontSize(s, 17), fontWeight: '700' }}>
-                    Task workspace
-                  </Text>
-                  <View
-                    style={{
-                      alignItems: 'center',
-                      backgroundColor: '#2fcf69',
-                      borderRadius: s(4),
-                      height: s(18),
-                      justifyContent: 'center',
-                      width: s(18),
-                    }}
-                  >
-                    <View
-                      style={{
-                        backgroundColor: '#ffffff',
-                        borderBottomWidth: Math.max(1.6, s(2)),
-                        borderColor: '#ffffff',
-                        borderRightWidth: Math.max(1.6, s(2)),
-                        height: s(7),
-                        transform: [{ rotate: '-45deg' }],
-                        width: s(7),
-                      }}
-                    />
-                  </View>
-                  <Text selectable style={{ color: '#2fcf69', fontSize: appFontSize(s, 17), fontWeight: '800' }}>
-                    Ready
-                  </Text>
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => openAction('join-team')}
-                  style={({ pressed }) => ({
-                    alignItems: 'center',
-                    backgroundColor: palette.green,
-                    borderRadius: 999,
-                    flexDirection: 'row',
-                    gap: x(10),
-                    height: y(50),
-                    justifyContent: 'center',
-                    marginTop: y(16),
-                    opacity: pressed ? 0.84 : 1,
-                    transform: [{ scale: pressed ? 0.97 : 1 }],
-                  })}
-                >
-                  <View style={{ alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 999, height: s(22), justifyContent: 'center', width: s(22) }}>
-                    <ArrowDown color="#000000" size={s(14)} strokeWidth={4} />
-                  </View>
-                  <Text selectable style={{ color: palette.ink, fontSize: appFontSize(s, 17), fontWeight: '800' }}>
-                    Join team
-                  </Text>
-                </Pressable>
-              </View>
-            ) : (
-              <View>
-                <View style={{ alignItems: 'center', flexDirection: 'row', gap: x(8) }}>
-                  <Text selectable style={{ color: '#b5b7b9', fontSize: appFontSize(s, 17), fontWeight: '700' }}>
-                    Total Balance
-                  </Text>
-                  <View
-                    style={{
-                      alignItems: 'center',
-                      backgroundColor: walletHealthColor,
-                      borderRadius: s(4),
-                      height: s(18),
-                      justifyContent: 'center',
-                      width: s(18),
-                    }}
-                  >
-                    <View
-                      style={{
-                        backgroundColor: '#ffffff',
-                        borderBottomWidth: Math.max(1.6, s(2)),
-                        borderColor: '#ffffff',
-                        borderRightWidth: Math.max(1.6, s(2)),
-                        height: s(7),
-                        transform: [{ rotate: '-45deg' }],
-                        width: s(7),
-                      }}
-                    />
-                  </View>
-                  <Text selectable style={{ color: walletHealthColor, fontSize: appFontSize(s, 17), fontWeight: '800' }}>
-                    {walletHealthPercent}%
-                  </Text>
-                </View>
-                <View style={{ alignItems: 'flex-end', flexDirection: 'row', marginTop: y(10) }}>
-                  <Text
-                    selectable
-                    style={{
-                      color: '#000000',
-                      fontSize: appFontSize(s, 52),
-                      fontWeight: '900',
-                      letterSpacing: -2,
-                      lineHeight: s(60),
-                    }}
-                  >
-                    {nairaSymbol}{formatNairaWhole(walletBalance)}
-                  </Text>
-                  <Text
-                    selectable
-                    style={{
-                      color: '#b9bbbd',
-                      fontSize: appFontSize(s, 52),
-                      fontWeight: '900',
-                      letterSpacing: -2,
-                      lineHeight: s(60),
-                    }}
-                  >
-                    .{walletBalanceParts[1] ?? '00'}
-                  </Text>
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setAddMoneyOpen(true)}
-                  style={({ pressed }) => ({
-                    alignItems: 'center',
-                    backgroundColor: palette.green,
-                    borderRadius: 999,
-                    flexDirection: 'row',
-                    gap: x(10),
-                    height: y(50),
-                    justifyContent: 'center',
-                    marginTop: y(18),
-                    opacity: pressed ? 0.84 : 1,
-                    transform: [{ scale: pressed ? 0.97 : 1 }],
-                  })}
-                >
-                  <View style={{ alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 999, height: s(22), justifyContent: 'center', width: s(22) }}>
-                    <ArrowDown color="#000000" size={s(14)} strokeWidth={4} />
-                  </View>
-                  <Text selectable style={{ color: palette.ink, fontSize: appFontSize(s, 17), fontWeight: '800' }}>
-                    Add money
-                  </Text>
-                </Pressable>
-              </View>
-            )}
+              {activeWalletSlide.title}
+            </Text>
+            <Text
+              selectable
+              style={{
+                color: '#aeb1b3',
+                fontSize: appFontSize(s, 16),
+                fontWeight: '700',
+                lineHeight: s(21),
+                marginTop: y(3),
+            }}
+          >
+              {activeWalletSlide.subtitle}
+            </Text>
           </View>
-
-          {/* ── Stats row: Teams | Tasks | Submissions ── */}
-          <View style={{ flexDirection: 'row', gap: x(10), marginBottom: y(14) }}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onViewTeam}
-              style={({ pressed }) => ({
-                alignItems: 'flex-start',
-                backgroundColor: '#ffffff',
-                borderRadius: s(20),
-                flex: 1,
-                opacity: pressed ? 0.75 : 1,
-                padding: s(16),
-                transform: [{ scale: pressed ? 0.97 : 1 }],
-              })}
-            >
-              <Text selectable style={{ color: '#050505', fontSize: appFontSize(s, 26), fontWeight: '900', letterSpacing: -0.5, lineHeight: s(30) }}>
-                {teamCount}
-              </Text>
-              <Text selectable style={{ color: '#888b84', fontSize: appFontSize(s, 12), fontWeight: '700', marginTop: y(3) }}>
-                Teams
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onViewTask}
-              style={({ pressed }) => ({
-                alignItems: 'flex-start',
-                backgroundColor: '#ffffff',
-                borderRadius: s(20),
-                flex: 1,
-                opacity: pressed ? 0.75 : 1,
-                padding: s(16),
-                transform: [{ scale: pressed ? 0.97 : 1 }],
-              })}
-            >
-              <Text selectable style={{ color: '#050505', fontSize: appFontSize(s, 26), fontWeight: '900', letterSpacing: -0.5, lineHeight: s(30) }}>
-                {taskCount}
-              </Text>
-              <Text selectable style={{ color: '#888b84', fontSize: appFontSize(s, 12), fontWeight: '700', marginTop: y(3) }}>
-                Tasks
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onOpenSubmissions}
-              style={({ pressed }) => ({
-                alignItems: 'flex-start',
-                backgroundColor: '#ffffff',
-                borderRadius: s(20),
-                flex: 1,
-                opacity: pressed ? 0.75 : 1,
-                padding: s(16),
-                transform: [{ scale: pressed ? 0.97 : 1 }],
-              })}
-            >
-              <Text selectable style={{ color: '#050505', fontSize: appFontSize(s, 26), fontWeight: '900', letterSpacing: -0.5, lineHeight: s(30) }}>
-                {submissionCount}
-              </Text>
-              <Text selectable style={{ color: '#888b84', fontSize: appFontSize(s, 12), fontWeight: '700', marginTop: y(3) }}>
-                {isCrewMate ? 'Submitted' : 'Reviews'}
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* ── Action cards grid ── */}
-          <View style={{ gap: y(12), marginBottom: y(16) }}>
-            {actionRows.map((row, rowIndex) => (
-              <View key={`home-action-row-${rowIndex}`} style={{ flexDirection: 'row', gap: x(12) }}>
-                {row.map((action) => (
-                  <HomeActionCard
-                    action={action}
-                    height={Math.round((width - x(40) - x(12)) / 2 * 0.72)}
-                    key={action.id}
-                    onPress={() => openAction(action.id)}
-                    s={s}
-                    scale={scale}
-                    width={Math.round((width - x(40) - x(12)) / 2)}
-                    x={x}
-                    y={y}
-                  />
-                ))}
-              </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setPromoVisible(false)}
+            style={({ pressed }) => ({
+              opacity: pressed ? 0.5 : 1,
+              padding: s(8),
+            })}
+          >
+            <CloseMiniIcon color="#b6b8ba" scale={scale} />
+          </Pressable>
+          <View
+            style={{
+              alignItems: 'center',
+              bottom: y(16),
+              flexDirection: 'row',
+              gap: x(5),
+              position: 'absolute',
+              right: x(28),
+            }}
+          >
+            {activeSlides.map((_, dot) => (
+              <View
+                key={`promo-dot-${dot}`}
+                style={{
+                  backgroundColor:
+                    dot === walletSlideIndex ? '#050505' : '#e0e2e4',
+                  borderRadius: 999,
+                  height: s(dot === 0 ? 5 : 6),
+                  width: s(dot === 0 ? 5 : 6),
+                }}
+              />
             ))}
           </View>
-
-          {/* ── Recent Transactions (CrewLead only) ── */}
-          {!isCrewMate ? (
-            <View style={{ backgroundColor: '#ffffff', borderRadius: s(24), marginBottom: y(16), padding: s(20) }}>
-              <View style={{ alignItems: 'center', flexDirection: 'row', marginBottom: y(14) }}>
-                <Text selectable style={{ color: '#050505', flex: 1, fontSize: appFontSize(s, 18), fontWeight: '900', letterSpacing: -0.3 }}>
-                  Recent Transactions
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={walletTransactions.length > 0 ? onOpenPayoutHistory : refreshWallet}
-                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-                >
-                  <Text selectable style={{ color: palette.greenDeep, fontSize: appFontSize(s, 13), fontWeight: '800' }}>
-                    {walletTransactions.length > 0 ? 'See all' : walletLoading ? 'Loading' : 'Refresh'}
-                  </Text>
-                </Pressable>
-              </View>
-              <View style={{ borderColor: '#edf0eb', borderRadius: s(20), borderWidth: 1, overflow: 'hidden', paddingHorizontal: x(14), paddingVertical: y(8) }}>
-                {walletError ? (
-                  <Text selectable numberOfLines={2} style={{ color: '#a33424', fontSize: appFontSize(s, 13), fontWeight: '700', paddingVertical: y(10) }}>
-                    {walletError}
-                  </Text>
-                ) : walletTransactions.length === 0 ? (
-                  <Text selectable style={{ color: '#aeb1b3', fontSize: appFontSize(s, 13), fontWeight: '700', paddingVertical: y(12), textAlign: 'center' }}>
-                    {walletLoading ? 'Loading wallet activity...' : 'Your first top up will appear here.'}
-                  </Text>
-                ) : (
-                  walletTransactions.slice(0, 5).map((transaction) => (
-                    <WalletTransactionRow
-                      compact
-                      key={transaction.id}
-                      s={s}
-                      transaction={transaction}
-                      x={x}
-                      y={y}
-                    />
-                  ))
-                )}
-              </View>
-            </View>
-          ) : null}
-
-          {/* ── Promo slide (crewmate only) ── */}
-          {promoVisible && isCrewMate ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setWalletSlideIndex((index) => (index + 1) % activeSlides.length)}
-              style={{
-                alignItems: 'center',
-                backgroundColor: '#ffffff',
-                borderColor: '#eceff1',
-                borderRadius: s(25),
-                borderWidth: 1,
-                flexDirection: 'row',
-                marginBottom: y(16),
-                minHeight: y(100),
-                overflow: 'hidden',
-                paddingHorizontal: x(20),
-                paddingVertical: y(16),
-              }}
-            >
-              <View style={{ alignItems: 'center', backgroundColor: '#eaf3ff', borderRadius: s(16), height: s(48), justifyContent: 'center', marginRight: x(14), width: s(48) }}>
-                <HomeActionIcon scale={scale} tone={activeWalletSlide.tone} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text selectable style={{ color: '#050505', fontSize: appFontSize(s, 17), fontWeight: '900', letterSpacing: -0.3 }}>
-                  {activeWalletSlide.title}
-                </Text>
-                <Text selectable style={{ color: '#aeb1b3', fontSize: appFontSize(s, 13), fontWeight: '700', marginTop: y(2) }}>
-                  {activeWalletSlide.subtitle}
-                </Text>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setPromoVisible(false)}
-                style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, padding: s(8) })}
-              >
-                <CloseMiniIcon color="#b6b8ba" scale={scale} />
-              </Pressable>
-              <View style={{ alignItems: 'center', bottom: y(16), flexDirection: 'row', gap: x(5), position: 'absolute', right: x(28) }}>
-                {activeSlides.map((_, dot) => (
-                  <View
-                    key={`promo-dot-${dot}`}
-                    style={{
-                      backgroundColor: dot === walletSlideIndex ? '#050505' : '#e0e2e4',
-                      borderRadius: 999,
-                      height: s(dot === 0 ? 5 : 6),
-                      width: s(dot === 0 ? 5 : 6),
-                    }}
-                  />
-                ))}
-              </View>
-            </Pressable>
-          ) : null}
-
-          {/* ── Empty state ── */}
-          {!hasTeam ? (
-            <View style={{ alignItems: 'center', backgroundColor: '#ffffff', borderRadius: s(24), marginBottom: y(16), padding: s(28) }}>
-              <Text selectable style={{ color: '#050505', fontSize: appFontSize(s, 20), fontWeight: '900', letterSpacing: -0.25, textAlign: 'center' }}>
-                {isCrewMate ? 'No active tasks yet' : 'Nothing here yet'}
-              </Text>
-              <Text selectable style={{ color: '#b5b7b9', fontSize: appFontSize(s, 16), fontWeight: '700', lineHeight: s(22), marginTop: y(6), textAlign: 'center' }}>
-                {isCrewMate
-                  ? 'Join a team to see assigned tasks and earn payouts'
-                  : 'Create a team, add tasks, and fund your wallet to start paying crew'}
-              </Text>
-            </View>
-          ) : null}
-        </ScrollView>
+        </Pressable>
       ) : null}
 
       {lastAction ? (
@@ -8223,7 +8273,7 @@ function HomeScreen({
                 marginTop: y(5),
               }}
             >
-              {isCrewMate ? 'Your team chats and recent activity.' : 'Wallet transactions and team messages.'}
+              {isCrewMate ? 'Your recent task submissions and team updates.' : 'Payouts, wallet activity, and team messages.'}
             </Text>
 
             <Pressable
@@ -8250,6 +8300,103 @@ function HomeScreen({
               <ChevronRight color={palette.ink} size={s(18)} strokeWidth={2.5} />
             </Pressable>
 
+            {!isCrewMate ? (
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onOpenPayoutHistory}
+                  style={({ pressed }) => ({
+                    alignItems: 'center',
+                    backgroundColor: pressed ? '#f0f1ea' : '#f5f6f0',
+                    borderColor: '#e2e4db',
+                    borderRadius: s(18),
+                    borderWidth: 1,
+                    flexDirection: 'row',
+                    gap: x(12),
+                    marginTop: y(12),
+                    paddingHorizontal: x(16),
+                    paddingVertical: y(14),
+                  })}
+                >
+                  <View style={{ alignItems: 'center', backgroundColor: palette.ink, borderRadius: 999, height: s(36), justifyContent: 'center', width: s(36) }}>
+                    <Text style={{ fontSize: s(18) }}>₦</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text selectable style={{ color: palette.ink, fontSize: s(16), fontWeight: '900' }}>Payout history</Text>
+                    <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>All wallet transactions and payout records</Text>
+                  </View>
+                  <ChevronRight color="#a0a59d" size={s(18)} strokeWidth={2.5} />
+                </Pressable>
+
+                {walletTransactions.length > 0 ? (
+                  <View style={{ gap: y(8), marginTop: y(20) }}>
+                    <Text selectable style={{ color: '#a0a59d', fontSize: s(12), fontWeight: '800', letterSpacing: 0.3, textTransform: 'uppercase' }}>
+                      Recent payouts
+                    </Text>
+                    {walletTransactions
+                      .filter((t) => t.direction === 'reserve' || t.direction === 'debit')
+                      .slice(0, 5)
+                      .map((t) => (
+                        <View
+                          key={t.id}
+                          style={{
+                            backgroundColor: '#f8f9f3',
+                            borderColor: '#eceee7',
+                            borderRadius: s(14),
+                            borderWidth: 1,
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            paddingHorizontal: x(14),
+                            paddingVertical: y(12),
+                          }}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text selectable style={{ color: palette.ink, fontSize: s(14), fontWeight: '800' }}>{t.title}</Text>
+                            <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>{t.subtitle}</Text>
+                          </View>
+                          <Text selectable style={{ color: '#e05252', fontSize: s(14), fontWeight: '900' }}>
+                            -{'\u20a6'}{Number(t.amountNaira || 0).toLocaleString()}
+                          </Text>
+                        </View>
+                      ))}
+                  </View>
+                ) : walletLoading ? (
+                  <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
+                    <ActivityIndicator color={palette.greenDeep} />
+                  </View>
+                ) : (
+                  <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
+                    <Text selectable style={{ color: '#a0a59d', fontSize: s(14), fontWeight: '600', textAlign: 'center' }}>No payouts yet. Process your first bulk transfer.</Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                onPress={onOpenSubmissions}
+                style={({ pressed }) => ({
+                  alignItems: 'center',
+                  backgroundColor: pressed ? '#f0f1ea' : '#f5f6f0',
+                  borderColor: '#e2e4db',
+                  borderRadius: s(18),
+                  borderWidth: 1,
+                  flexDirection: 'row',
+                  gap: x(12),
+                  marginTop: y(12),
+                  paddingHorizontal: x(16),
+                  paddingVertical: y(14),
+                })}
+              >
+                <View style={{ alignItems: 'center', backgroundColor: palette.green, borderRadius: 999, height: s(36), justifyContent: 'center', width: s(36) }}>
+                  <Text style={{ fontSize: s(18) }}>📋</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text selectable style={{ color: palette.ink, fontSize: s(16), fontWeight: '900' }}>My submissions</Text>
+                  <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>View your submitted work and approval status</Text>
+                </View>
+                <ChevronRight color="#a0a59d" size={s(18)} strokeWidth={2.5} />
+              </Pressable>
+            )}
           </ScrollView>
         </View>
       ) : null}
@@ -8267,6 +8414,18 @@ function HomeScreen({
         />
       ) : null}
 
+      {transactionsOpen ? (
+        <WalletTransactionsScreen
+          loading={walletLoading}
+          onBack={() => setTransactionsOpen(false)}
+          onRefresh={refreshWallet}
+          s={s}
+          transactions={walletTransactions}
+          walletError={walletError}
+          x={x}
+          y={y}
+        />
+      ) : null}
 
       {!homeChromeHidden ? (
         <>
@@ -8419,6 +8578,79 @@ function HomeScreen({
         />
       ) : null}
     </View>
+  );
+}
+
+function HomeCountLink({
+  count,
+  label,
+  onPress,
+  s,
+  x,
+}: {
+  count: number;
+  label: string;
+  onPress: () => void;
+  s: (value: number) => number;
+  x: (value: number) => number;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={`${count} ${label}`}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => ({
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: x(5),
+        opacity: pressed ? 0.5 : 1,
+        paddingHorizontal: x(9),
+        paddingVertical: s(4),
+      })}
+    >
+      <Text
+        selectable
+        style={{
+          color: palette.greenDeep,
+          fontSize: appFontSize(s, 14),
+          fontWeight: '900',
+          lineHeight: s(18),
+        }}
+      >
+        {count}
+      </Text>
+      <Text
+        selectable
+        style={{
+          color: '#747a70',
+          fontSize: appFontSize(s, 13),
+          fontWeight: '700',
+          lineHeight: s(18),
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function HomeCountDivider({
+  s,
+  x,
+}: {
+  s: (value: number) => number;
+  x: (value: number) => number;
+}) {
+  return (
+    <View
+      style={{
+        backgroundColor: '#dfe2da',
+        borderRadius: 999,
+        height: s(4),
+        marginHorizontal: x(2),
+        width: s(4),
+      }}
+    />
   );
 }
 
@@ -14158,8 +14390,20 @@ function ViewTasksScreen({
       .map((team) => [team.id, team.name]),
   );
   const [selectedTask, setSelectedTask] = useState<TaskWithTeams | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'submitted' | 'approved' | 'rejected'>('all');
+  const [statusFilter, setStatusFilter] = useState<
+    | 'all'
+    | 'pending'
+    | 'submitted'
+    | 'approved'
+    | 'rejected'
+    | 'published'
+    | 'draft'
+    | 'closed'
+  >('all');
   const isCrewMate = role === 'crewmate';
+  const statusFilters = isCrewMate
+    ? (['all', 'pending', 'submitted', 'approved', 'rejected'] as const)
+    : (['all', 'published', 'draft', 'closed'] as const);
   const filteredTasks = statusFilter === 'all'
     ? tasks
     : tasks.filter((task) => {
@@ -14319,34 +14563,64 @@ function ViewTasksScreen({
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-          <ScrollView
-            contentContainerStyle={{ flexDirection: 'row', gap: x(8), paddingBottom: y(8), paddingTop: y(20) }}
-            horizontal
-            showsHorizontalScrollIndicator={false}
+          <View
+            style={{
+              backgroundColor: '#f3f4ef',
+              borderRadius: s(16),
+              flexDirection: 'row',
+              gap: x(3),
+              marginTop: y(20),
+              padding: s(4),
+              width: '100%',
+            }}
           >
-            {(['all', 'pending', 'submitted', 'approved', 'rejected'] as const).map((f) => {
+            {statusFilters.map((f) => {
               const isActive = statusFilter === f;
-              const filterLabel = f === 'all' ? 'All' : f === 'pending' ? 'Pending' : f === 'submitted' ? 'In Review' : f === 'approved' ? 'Approved' : 'Rejected';
+              const filterLabel =
+                f === 'all'
+                  ? 'All'
+                  : f === 'pending'
+                    ? 'Pending'
+                    : f === 'submitted'
+                      ? 'In Review'
+                      : f === 'published'
+                        ? 'Active'
+                        : f.charAt(0).toUpperCase() + f.slice(1);
               return (
                 <Pressable
                   key={f}
                   accessibilityRole="button"
                   onPress={() => setStatusFilter(f)}
                   style={({ pressed }) => ({
-                    backgroundColor: isActive ? palette.ink : '#f2f3ef',
-                    borderRadius: 999,
+                    alignItems: 'center',
+                    backgroundColor: isActive ? '#ffffff' : 'transparent',
+                    borderRadius: s(11),
+                    flex: 1,
+                    justifyContent: 'center',
+                    minHeight: s(36),
                     opacity: pressed ? 0.75 : 1,
-                    paddingHorizontal: x(18),
-                    paddingVertical: y(8),
+                    paddingHorizontal: x(4),
+                    shadowColor: '#11130f',
+                    shadowOffset: { height: 1, width: 0 },
+                    shadowOpacity: isActive ? 0.07 : 0,
+                    shadowRadius: s(4),
                   })}
                 >
-                  <Text style={{ color: isActive ? '#ffffff' : '#747a70', fontSize: appFontSize(s, 14), fontWeight: '800' }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      color: isActive ? palette.greenDeep : '#7f847b',
+                      fontSize: appFontSize(s, 11.5),
+                      fontWeight: isActive ? '800' : '600',
+                      letterSpacing: -0.1,
+                    }}
+                  >
                     {filterLabel}
                   </Text>
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </View>
           {filteredTasks.length === 0 ? (
             <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center', paddingBottom: y(90) }}>
               <Text style={{ color: 'rgba(5,5,5,0.45)', fontSize: appFontSize(s, 17), fontWeight: '600', textAlign: 'center' }}>
