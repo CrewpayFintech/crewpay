@@ -270,7 +270,7 @@ function isWalletDepositReturnUrl(url?: string | null) {
 
 const pendingWalletDepositStorageKey = 'crewpay.pendingWalletDepositTxRef';
 const pendingInviteStorageKey = 'crewpay.pendingInvite.v1';
-const pendingInviteTtlMs = 30 * 60 * 1000;
+const pendingInviteTtlMs = 24 * 60 * 60 * 1000;
 const preferredRoleStorageKeyPrefix = 'crewpay.preferredRole.v1';
 const seenSubmissionStorageKeyPrefix = 'crewpay.seen-submissions.v1';
 type PendingInvite = {
@@ -509,6 +509,14 @@ export default function App() {
           }
         }
 
+        // Google has just re-authenticated the user. A pending invite should
+        // continue straight to its join screen instead of being trapped by a
+        // app passcode gate before the invite can be completed.
+        if (activePendingInvite && profile?.onboarding_status === 'complete') {
+          setScreen('join-team');
+          return;
+        }
+
         if (options?.requirePasscode && user && hasPasscode) {
           setUnlockCode('');
           setUnlockError('');
@@ -665,7 +673,12 @@ export default function App() {
         provider: 'google',
         options: {
           redirectTo: authRedirectUrl,
-          skipBrowserRedirect: !isWeb,
+          queryParams: {
+            prompt: 'select_account',
+          },
+          // We redirect manually on web so mobile browsers do not swallow the
+          // OAuth navigation silently on a Pressable tap.
+          skipBrowserRedirect: true,
         },
       });
 
@@ -674,6 +687,11 @@ export default function App() {
       }
 
       if (isWeb) {
+        if (!data.url) {
+          throw new Error('Google sign-in could not be started.');
+        }
+
+        window.location.assign(data.url);
         return;
       }
 
@@ -822,6 +840,19 @@ export default function App() {
 
   const handleIncomingUrl = useCallback(
     async (url: string) => {
+      const authParams = getAuthCallbackParams(url);
+      const hasAuthCallback =
+        authParams.has('access_token') ||
+        authParams.has('refresh_token') ||
+        authParams.has('code') ||
+        authParams.has('error') ||
+        authParams.has('error_description');
+
+      if (hasAuthCallback) {
+        await handleOAuthRedirectUrl(url);
+        return;
+      }
+
       const invite = await capturePendingInviteFromUrl(url);
 
       if (invite) {
@@ -846,7 +877,6 @@ export default function App() {
         return;
       }
 
-      await handleOAuthRedirectUrl(url);
     },
     [
       capturePendingInviteFromUrl,
@@ -3042,6 +3072,7 @@ function SocialAuthButton({
       })}
     >
       <View
+        pointerEvents="none"
         style={{
           alignItems: 'center',
           height: s(32),
@@ -3058,7 +3089,8 @@ function SocialAuthButton({
         )}
       </View>
       <Text
-        selectable
+        pointerEvents="none"
+        selectable={false}
         style={{
           color: isApple ? '#ffffff' : palette.ink,
           fontSize: appFontSize(s, 22),
@@ -10937,9 +10969,9 @@ function TeamDetailScreen({
         typeof window !== 'undefined' && window.location?.origin
           ? window.location.origin
           : 'https://crewpay.online';
-      const joinLink = `${baseUrl}/?invite=${encodeURIComponent(
+      const joinLink = `${baseUrl}/join-team/${encodeURIComponent(
         invite.token,
-      )}&team=${encodeURIComponent(team.name)}`;
+      )}?team=${encodeURIComponent(team.name)}`;
 
       await Share.share({
         message: `Join ${team.name} on CrewPay.\n\n${joinLink}\n\nInvite code: ${invite.token}`,

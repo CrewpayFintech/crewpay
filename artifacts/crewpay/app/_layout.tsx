@@ -9,6 +9,10 @@ export default function RootLayout() {
       <ErrorBoundary>
         <Stack screenOptions={{ headerShown: false, animation: 'none' }}>
           <Stack.Screen name="index" />
+          <Stack.Screen name="auth/callback" />
+          <Stack.Screen name="join-team/index" />
+          <Stack.Screen name="join-team/[token]" />
+          <Stack.Screen name="+not-found" />
         </Stack>
       </ErrorBoundary>
     </SafeAreaProvider>

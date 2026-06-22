@@ -12,6 +12,7 @@ body {
   overflow: hidden;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 #root {
@@ -39,6 +40,8 @@ select {
   outline: none !important;
   -webkit-appearance: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 input:focus,
@@ -47,6 +50,13 @@ select:focus,
 *[contenteditable='true']:focus {
   outline: none !important;
   box-shadow: none !important;
+}
+
+button,
+[role='button'] {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 * {

@@ -45,13 +45,6 @@ export function extractInviteDetails(value: string): InviteLinkDetails {
 
   try {
     const url = new URL(trimmed);
-    const tokenFromSearch =
-      url.searchParams.get('invite') ||
-      url.searchParams.get('invite_token') ||
-      url.searchParams.get('team_invite') ||
-      url.searchParams.get('token') ||
-      url.searchParams.get('code') ||
-      '';
     const pathParts = url.pathname.split('/').filter(Boolean);
     const joinIndex = pathParts.findIndex((part) =>
       ['join', 'join-team', 'team-invite'].includes(part.toLowerCase()),
@@ -59,6 +52,15 @@ export function extractInviteDetails(value: string): InviteLinkDetails {
     const hostnameIsInvite = ['join', 'join-team', 'team-invite'].includes(
       url.hostname.toLowerCase(),
     );
+    const isInviteRoute = joinIndex >= 0 || hostnameIsInvite;
+    const tokenFromSearch =
+      url.searchParams.get('invite') ||
+      url.searchParams.get('invite_token') ||
+      url.searchParams.get('team_invite') ||
+      url.searchParams.get('token') ||
+      // OAuth callbacks also use `code`; only accept it on an invite route.
+      (isInviteRoute ? url.searchParams.get('code') : '') ||
+      '';
     const tokenFromPath =
       joinIndex >= 0
         ? pathParts[joinIndex + 1] ?? ''
