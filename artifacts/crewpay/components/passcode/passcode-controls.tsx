@@ -92,7 +92,11 @@ export function PasscodeKeypad({
 
             return (
               <Pressable
+                accessibilityLabel={
+                  value === 'Delete' ? 'Delete passcode digit' : `Passcode ${value}`
+                }
                 accessibilityRole="button"
+                hitSlop={8}
                 key={key}
                 onPress={() =>
                   value === 'Delete' ? onDelete() : onDigit(value)
@@ -106,7 +110,8 @@ export function PasscodeKeypad({
                 })}
               >
                 <Text
-                  selectable
+                  pointerEvents="none"
+                  selectable={false}
                   style={{
                     color: palette.greenDeep,
                     fontSize: s(23),
