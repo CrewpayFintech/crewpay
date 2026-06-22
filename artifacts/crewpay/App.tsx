@@ -9,6 +9,7 @@ import {
   nigerianBanks,
   saveBankAccount,
   type NigerianBank,
+  getMyBankAccount,
 } from './lib/bank-service';
 import {
   createTeamRecord,
@@ -1474,7 +1475,16 @@ export default function App() {
           />
         </View>
       ) : (
-        <View style={{ backgroundColor: palette.paper, flex: 1 }} />
+        <View
+          style={{
+            alignItems: 'center',
+            backgroundColor: palette.paper,
+            flex: 1,
+            justifyContent: 'center',
+          }}
+        >
+          <ActivityIndicator color={palette.greenDeep} size="large" />
+        </View>
       )}
       {screen === 'email' ? (
         <View
@@ -1680,8 +1690,29 @@ export default function App() {
                 : pendingJoinRequests.length + unreadAppNotificationCount
             }
             role={selectedRole}
+            onEditPayoutInfo={() => setScreen('edit-bank')}
             syncError={syncError}
             syncStatus={syncStatus}
+          />
+        </View>
+      ) : null}
+      {screen === 'edit-bank' ? (
+        <View
+          style={{
+            bottom: 0,
+            left: 0,
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            zIndex: 10,
+          }}
+        >
+          <EditBankScreen
+            onBack={() => setScreen('home')}
+            onSaved={() => {
+              Alert.alert('Saved', 'Your payout info has been updated.');
+              setScreen('home');
+            }}
           />
         </View>
       ) : null}
@@ -4214,6 +4245,8 @@ function BankDetailsStep({
   const [bankFieldFocused, setBankFieldFocused] = useState(false);
   const [accountNumberFocused, setAccountNumberFocused] = useState(false);
   const [accountNameFocused, setAccountNameFocused] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
   const bankBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const normalizedBankQuery = bankQuery.trim().toLowerCase();
   const bankMatches = useMemo(() => {
@@ -4273,6 +4306,59 @@ function BankDetailsStep({
   );
 
   useEffect(() => clearBankBlurTimer, [clearBankBlurTimer]);
+
+  useEffect(() => {
+    const cleanNum = accountNumber.replace(/\D/g, '').slice(0, 10);
+
+    if (cleanNum.length !== 10 || !bankCode) {
+      setVerifyError('');
+      return;
+    }
+
+    setVerifying(true);
+    setVerifyError('');
+
+    const controller = new AbortController();
+
+    const baseUrl =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : '';
+
+    fetch(
+      `${baseUrl}/api/verify-bank?account_number=${encodeURIComponent(
+        cleanNum,
+      )}&bank_code=${encodeURIComponent(bankCode)}`,
+      { signal: controller.signal },
+    )
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error('Could not verify account');
+        }
+
+        return res.json();
+      })
+      .then((data: { account_name?: string }) => {
+        if (data?.account_name) {
+          setAccountName(data.account_name);
+          setVerifyError('');
+        } else {
+          setVerifyError('Account not found — please check your details.');
+        }
+      })
+      .catch((err: Error) => {
+        if (err?.name !== 'AbortError') {
+          setVerifyError(
+            'Could not auto-verify. You can enter the account name manually.',
+          );
+        }
+      })
+      .finally(() => {
+        setVerifying(false);
+      });
+
+    return () => controller.abort();
+  }, [accountNumber, bankCode, setAccountName]);
 
   const pageContent = (
     <KeyboardAvoidingView
@@ -4475,19 +4561,68 @@ function BankDetailsStep({
             x={x}
             y={y}
           />
-          <Text
-            selectable
-            style={{
-              color: '#8c9188',
-              fontSize: appFontSize(s, 13),
-              fontWeight: '500',
-              lineHeight: s(20),
-              marginTop: y(10),
-            }}
-          >
-            We will verify account names automatically once the payment gateway
-            account lookup is connected.
-          </Text>
+          {verifying ? (
+            <View
+              style={{
+                alignItems: 'center',
+                flexDirection: 'row',
+                gap: x(8),
+                marginTop: y(10),
+              }}
+            >
+              <ActivityIndicator color={palette.greenDeep} size="small" />
+              <Text
+                selectable
+                style={{
+                  color: palette.greenDeep,
+                  fontSize: appFontSize(s, 13),
+                  fontWeight: '600',
+                }}
+              >
+                Verifying account…
+              </Text>
+            </View>
+          ) : verifyError ? (
+            <Text
+              selectable
+              style={{
+                color: '#c0392b',
+                fontSize: appFontSize(s, 13),
+                fontWeight: '500',
+                lineHeight: s(20),
+                marginTop: y(10),
+              }}
+            >
+              {verifyError}
+            </Text>
+          ) : accountName.trim().length >= 2 && bankCode ? (
+            <Text
+              selectable
+              style={{
+                color: palette.greenDeep,
+                fontSize: appFontSize(s, 13),
+                fontWeight: '700',
+                lineHeight: s(20),
+                marginTop: y(10),
+              }}
+            >
+              ✓ Account verified
+            </Text>
+          ) : (
+            <Text
+              selectable
+              style={{
+                color: '#8c9188',
+                fontSize: appFontSize(s, 13),
+                fontWeight: '500',
+                lineHeight: s(20),
+                marginTop: y(10),
+              }}
+            >
+              Enter a 10-digit account number with a bank selected to
+              auto-verify.
+            </Text>
+          )}
 
           <Pressable
             accessibilityRole="button"
@@ -7189,6 +7324,7 @@ function HomeScreen({
   onOpenRequests,
   onOpenSubmissions,
   onRetrySync,
+  onEditPayoutInfo,
   onSwitchRole,
   onViewTask,
   onViewTeam,
@@ -7202,6 +7338,7 @@ function HomeScreen({
   onBulkTransfer: () => void;
   onCreateTeam: () => void;
   onCreateTask: () => void;
+  onEditPayoutInfo: () => void;
   onJoinTeam: () => void;
   onLogout: () => void;
   onOpenPayoutHistory: () => void;
@@ -7921,18 +8058,6 @@ function HomeScreen({
         ))}
       </View>
 
-      {!isCrewMate ? (
-        <HomeTransactionSection
-          loading={walletLoading}
-          onRefresh={refreshWallet}
-          onSeeAll={() => setTransactionsOpen(true)}
-          s={s}
-          transactions={walletTransactions.slice(0, 3)}
-          walletError={walletError}
-          x={x}
-          y={y}
-        />
-      ) : null}
 
       {promoVisible && isCrewMate ? (
         <Pressable
@@ -8126,46 +8251,6 @@ function HomeScreen({
               <ChevronRight color={palette.ink} size={s(18)} strokeWidth={2.5} />
             </Pressable>
 
-            {!isCrewMate ? (
-              walletTransactions.length > 0 ? (
-                <View style={{ gap: y(8), marginTop: y(20) }}>
-                  <Text selectable style={{ color: '#a0a59d', fontSize: s(12), fontWeight: '800', letterSpacing: 0.3, textTransform: 'uppercase' }}>
-                    Recent transactions
-                  </Text>
-                  {walletTransactions.slice(0, 6).map((t) => (
-                    <View
-                      key={t.id}
-                      style={{
-                        backgroundColor: '#f8f9f3',
-                        borderColor: '#eceee7',
-                        borderRadius: s(14),
-                        borderWidth: 1,
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        paddingHorizontal: x(14),
-                        paddingVertical: y(12),
-                      }}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text selectable style={{ color: palette.ink, fontSize: s(14), fontWeight: '800' }}>{t.title}</Text>
-                        <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>{t.subtitle}</Text>
-                      </View>
-                      <Text selectable style={{ color: t.direction === 'credit' ? '#1c7a3d' : '#e05252', fontSize: s(14), fontWeight: '900' }}>
-                        {t.direction === 'credit' ? '+' : '-'}{'\u20a6'}{Number(t.amountNaira || 0).toLocaleString()}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              ) : walletLoading ? (
-                <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
-                  <ActivityIndicator color={palette.greenDeep} />
-                </View>
-              ) : (
-                <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
-                  <Text selectable style={{ color: '#a0a59d', fontSize: s(14), fontWeight: '600', textAlign: 'center' }}>No transactions yet. Add money and start paying your crew.</Text>
-                </View>
-              )
-            ) : null}
           </ScrollView>
         </View>
       ) : null}
@@ -8173,6 +8258,7 @@ function HomeScreen({
       {activeTab === 'settings' ? (
         <HomeSettingsPanel
           email={email}
+          onEditPayoutInfo={onEditPayoutInfo}
           onLogout={onLogout}
           onSwitchRole={onSwitchRole}
           role={role}
@@ -8182,18 +8268,6 @@ function HomeScreen({
         />
       ) : null}
 
-      {transactionsOpen ? (
-        <WalletTransactionsScreen
-          loading={walletLoading}
-          onBack={() => setTransactionsOpen(false)}
-          onRefresh={refreshWallet}
-          s={s}
-          transactions={walletTransactions}
-          walletError={walletError}
-          x={x}
-          y={y}
-        />
-      ) : null}
 
       {!homeChromeHidden ? (
         <>
@@ -8223,9 +8297,9 @@ function HomeScreen({
               scale={scale}
             />
             <HomeTabButton
-              active={activeTab === 'activity'}
+              active={false}
               icon="activity"
-              onPress={() => setActiveTab('activity')}
+              onPress={onOpenChat}
               scale={scale}
             />
             <HomeTabButton
@@ -8776,6 +8850,7 @@ function WalletTransactionRow({
 
 function HomeSettingsPanel({
   email,
+  onEditPayoutInfo,
   onLogout,
   onSwitchRole,
   role,
@@ -8784,6 +8859,7 @@ function HomeSettingsPanel({
   y,
 }: {
   email: string;
+  onEditPayoutInfo: () => void;
   onLogout: () => void;
   onSwitchRole: () => void;
   role: AccountRole;
@@ -8883,6 +8959,17 @@ function HomeSettingsPanel({
       </View>
 
       <View style={{ gap: y(14), marginTop: y(22) }}>
+        {isCrewMate ? (
+          <SettingsRow
+            description="Update your bank account for receiving payouts."
+            icon={<CreditCard color="#050505" size={s(22)} strokeWidth={2.8} />}
+            onPress={onEditPayoutInfo}
+            s={s}
+            title="Edit payout info"
+            x={x}
+            y={y}
+          />
+        ) : null}
         <SettingsRow
           description={`Switch to ${
             isCrewMate ? 'CrewLead' : 'CrewMate'
@@ -8987,6 +9074,103 @@ function SettingsRow({
       </View>
       {onPress ? <ChevronRightIcon scale={s(1) * 0.52} /> : null}
     </Pressable>
+  );
+}
+
+function EditBankScreen({
+  onBack,
+  onSaved,
+}: {
+  onBack: () => void;
+  onSaved: () => void;
+}) {
+  const { width, height } = useWindowDimensions();
+  const widthScale = width / 590;
+  const heightScale = height / 1280;
+  const scale = Math.min(widthScale, heightScale);
+  const x = (v: number) => Math.round(v * widthScale);
+  const y = (v: number) => Math.round(v * heightScale);
+  const s = (v: number) => Math.round(v * scale);
+  const [bankName, setBankName] = useState('');
+  const [bankCode, setBankCode] = useState('');
+  const [bankQuery, setBankQuery] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankAccountName, setBankAccountName] = useState('');
+  const [savingBankAccount, setSavingBankAccount] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getMyBankAccount()
+      .then((record) => {
+        if (record) {
+          setBankName(record.bank_name);
+          setBankCode(record.bank_code ?? '');
+          setBankQuery(record.bank_name);
+          setBankAccountNumber(record.account_number);
+          setBankAccountName(record.account_name);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    setSavingBankAccount(true);
+
+    try {
+      await saveBankAccount({
+        accountName: bankAccountName,
+        accountNumber: bankAccountNumber,
+        bankCode,
+        bankName,
+      });
+      onSaved();
+    } catch (error) {
+      Alert.alert('Could not save', getErrorMessage(error));
+    } finally {
+      setSavingBankAccount(false);
+    }
+  }, [bankAccountName, bankAccountNumber, bankCode, bankName, onSaved]);
+
+  if (loading) {
+    return (
+      <View
+        style={{
+          alignItems: 'center',
+          backgroundColor: '#ffffff',
+          flex: 1,
+          justifyContent: 'center',
+        }}
+      >
+        <ActivityIndicator color={palette.greenDeep} size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <BankDetailsStep
+      accountName={bankAccountName}
+      accountNumber={bankAccountNumber}
+      bankCode={bankCode}
+      bankName={bankName}
+      bankQuery={bankQuery}
+      height={height}
+      isSaving={savingBankAccount}
+      onBack={onBack}
+      onContinue={handleSave}
+      s={s}
+      scale={scale}
+      setAccountName={setBankAccountName}
+      setAccountNumber={setBankAccountNumber}
+      setBankQuery={setBankQuery}
+      setSelectedBank={(bank) => {
+        setBankName(bank.name);
+        setBankCode(bank.code);
+      }}
+      width={width}
+      x={x}
+      y={y}
+    />
   );
 }
 
@@ -10656,7 +10840,11 @@ function TeamDetailScreen({
         team.id,
         team.joinRule === 'Invite only' ? 'auto_join' : 'request',
       );
-      const joinLink = `https://crewpay.online/?invite=${encodeURIComponent(
+      const baseUrl =
+        typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : 'https://crewpay.online';
+      const joinLink = `${baseUrl}/?invite=${encodeURIComponent(
         invite.token,
       )}&team=${encodeURIComponent(team.name)}`;
 
@@ -20546,7 +20734,7 @@ function appFontSize(s: (value: number) => number, value: number) {
   const scaled = s(value);
   const minimumLift = value < 18 ? 1 : 2;
 
-  return Math.max(scaled + minimumLift, Math.round(scaled * 1.08));
+  return Math.max(scaled + minimumLift, Math.round(scaled * 1.08), Math.round(value * 0.82));
 }
 
 function ArrowLeftIcon({

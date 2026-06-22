@@ -33,7 +33,8 @@ export type AppScreen =
   | 'view-task'
   | 'view-team'
   | 'bulk-transfer'
-  | 'payout-history';
+  | 'payout-history'
+  | 'edit-bank';
 
 export type EmailStep = 'entry' | 'otp';
 export type AccountIntroSource = 'onboarding' | 'email';
