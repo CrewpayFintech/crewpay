@@ -875,6 +875,12 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
+    const authCheckTimeout = setTimeout(() => {
+      if (isMounted) {
+        setAuthChecked(true);
+      }
+    }, 8000);
+
     const restoreSession = async () => {
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         const params = getAuthCallbackParams(window.location.href);
@@ -989,6 +995,7 @@ export default function App() {
 
     return () => {
       isMounted = false;
+      clearTimeout(authCheckTimeout);
       subscription.unsubscribe();
     };
   }, [
