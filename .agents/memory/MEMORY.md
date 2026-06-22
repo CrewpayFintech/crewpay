@@ -1,0 +1,3 @@
+- [HomeScreen layout](homescreen-layout.md) — was absolute-positioned, now ScrollView-based with #f8f9f4 background; all overlays (activity, settings, nav, overlays) remain absolute inside same View.
+- [HomeScreen props](homescreen-props.md) — added submissionCount, taskCount, teamCount (number) props; passed from App.tsx using availableTeams.length, createdTasks.length, myTaskSubmissions.length.
+- [Chat file transfer](chat-file-transfer.md) — already fully implemented in artifacts/crewpay/components/chat/chat-screen.tsx via handleAttach + uploadChatAttachment.
