@@ -344,6 +344,7 @@ export default function App() {
   >([]);
   const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
   const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
+  const [teamIdToOpen, setTeamIdToOpen] = useState('');
   const [seenJoinNotificationKeys, setSeenJoinNotificationKeys] = useState<string[]>(
     [],
   );
@@ -1910,8 +1911,10 @@ export default function App() {
           }}
         >
           <ViewTeamsScreen
+            initialTeamId={teamIdToOpen}
             onBack={() => setScreen('home')}
             onJoinTeam={() => setScreen('join-team')}
+            onInitialTeamOpened={() => setTeamIdToOpen('')}
             membersByTeamId={teamMembersByTeamId}
             onRefreshMembers={refreshTeamMembers}
             onRefreshMySubmissions={refreshMySubmissionsFromBackend}
@@ -1992,7 +1995,7 @@ export default function App() {
 
               setScreen('home');
             }}
-            onJoined={async () => {
+            onJoined={async (joinResult) => {
               await persistPendingInvite(null);
 
               setSelectedRole('crewmate');
@@ -2010,6 +2013,12 @@ export default function App() {
                 refreshMyJoinRequestStatuses(),
                 refreshMySubmissionsFromBackend(),
               ]);
+
+              if (joinResult.join_status === 'joined') {
+                setTeamIdToOpen(joinResult.team_id);
+                setScreen('view-team');
+                return;
+              }
 
               setScreen('home');
             }}
@@ -6342,7 +6351,9 @@ function JoinTeamScreen({
   initialInviteValue?: string;
   initialTeamName?: string;
   onBack: () => void;
-  onJoined: () => void | Promise<void>;
+  onJoined: (
+    result: Awaited<ReturnType<typeof joinTeamWithInvite>>,
+  ) => void | Promise<void>;
 }) {
   const { width, height } = useWindowDimensions();
   const widthScale = width / 590;
@@ -6377,11 +6388,6 @@ function JoinTeamScreen({
   }, [initialInviteValue]);
 
   const submitInvite = useCallback(async () => {
-    if (joinResult) {
-      await onJoined();
-      return;
-    }
-
     if (!canJoin) {
       return;
     }
@@ -6390,13 +6396,22 @@ function JoinTeamScreen({
     setErrorMessage('');
     setIsJoining(true);
 
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
     try {
-      const result = await joinTeamWithInvite(
-        inviteToken,
-        message.trim() || undefined,
-      );
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('Joining took too long. Please try again.')),
+          20000,
+        );
+      });
+      const result = await Promise.race([
+        joinTeamWithInvite(inviteToken, message.trim() || undefined),
+        timeout,
+      ]);
 
       setJoinResult(result);
+      await onJoined(result);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -6404,9 +6419,12 @@ function JoinTeamScreen({
           : 'Please check the invite code and try again.',
       );
     } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       setIsJoining(false);
     }
-  }, [canJoin, inviteToken, joinResult, message, onJoined]);
+  }, [canJoin, inviteToken, message, onJoined]);
 
   if (showSkeleton) {
     return <JoinTeamSkeleton />;
@@ -10547,10 +10565,12 @@ function formatTaskLocationType(type: CreateTaskInput['locationType']) {
 }
 
 function ViewTeamsScreen({
+  initialTeamId,
   membersByTeamId,
   mySubmissions,
   onBack,
   onJoinTeam,
+  onInitialTeamOpened,
   onRefreshMembers,
   onRefreshMySubmissions,
   onRefreshTasks,
@@ -10562,10 +10582,12 @@ function ViewTeamsScreen({
   teamSubmissionsByTeamId,
   teams,
 }: {
+  initialTeamId?: string;
   membersByTeamId: Record<string, TeamMemberListItem[]>;
   mySubmissions: MyTaskSubmission[];
   onBack: () => void;
   onJoinTeam: () => void;
+  onInitialTeamOpened?: () => void;
   onRefreshMembers: (teamId?: string) => void;
   onRefreshMySubmissions: () => void;
   onRefreshTasks: () => void;
@@ -10578,6 +10600,21 @@ function ViewTeamsScreen({
   teams: TeamDraft[];
 }) {
   const [selectedTeam, setSelectedTeam] = useState<TeamDraft | null>(null);
+
+  useEffect(() => {
+    if (!initialTeamId) {
+      return;
+    }
+
+    const teamToOpen = teams.find((team) => team.id === initialTeamId);
+
+    if (!teamToOpen) {
+      return;
+    }
+
+    setSelectedTeam(teamToOpen);
+    onInitialTeamOpened?.();
+  }, [initialTeamId, onInitialTeamOpened, teams]);
 
   useEffect(() => {
     if (
