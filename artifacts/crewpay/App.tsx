@@ -154,7 +154,6 @@ import type {
   TeamDraft,
 } from './types/app';
 import {
-  extractInviteDetails,
   extractInviteToken,
   formatRequestTime,
   getAuthCallbackParams,
@@ -269,8 +268,6 @@ function isWalletDepositReturnUrl(url?: string | null) {
 }
 
 const pendingWalletDepositStorageKey = 'crewpay.pendingWalletDepositTxRef';
-const pendingInviteStorageKey = 'crewpay.pendingInvite.v1';
-const pendingInviteTtlMs = 24 * 60 * 60 * 1000;
 const preferredRoleStorageKeyPrefix = 'crewpay.preferredRole.v1';
 const seenSubmissionStorageKeyPrefix = 'crewpay.seen-submissions.v1';
 type PendingInvite = {
@@ -343,7 +340,6 @@ export default function App() {
     MyJoinRequestStatus[]
   >([]);
   const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
-  const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
   const [teamIdToOpen, setTeamIdToOpen] = useState('');
   const [seenJoinNotificationKeys, setSeenJoinNotificationKeys] = useState<string[]>(
     [],
@@ -408,82 +404,15 @@ export default function App() {
     setScreen('account-intro');
   }, []);
 
-  const loadStoredPendingInvite = useCallback(async (): Promise<PendingInvite | null> => {
-    try {
-      const value = await AsyncStorage.getItem(pendingInviteStorageKey);
-      const parsed = value ? (JSON.parse(value) as Partial<PendingInvite>) : null;
-
-      if (!parsed?.token || typeof parsed.token !== 'string') {
-        return null;
-      }
-
-      const createdAt =
-        typeof parsed.createdAt === 'number' && Number.isFinite(parsed.createdAt)
-          ? parsed.createdAt
-          : 0;
-
-      if (!createdAt || Date.now() - createdAt > pendingInviteTtlMs) {
-        setPendingInvite(null);
-        await AsyncStorage.removeItem(pendingInviteStorageKey);
-        return null;
-      }
-
-      return {
-        createdAt,
-        teamName:
-          typeof parsed.teamName === 'string' && parsed.teamName.trim()
-            ? parsed.teamName
-            : undefined,
-        token: parsed.token.trim(),
-      };
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const persistPendingInvite = useCallback(async (invite: PendingInvite | null) => {
-    if (!invite?.token) {
-      setPendingInvite(null);
-      await AsyncStorage.removeItem(pendingInviteStorageKey);
-      return null;
-    }
-
-    const nextInvite = {
-      createdAt: Date.now(),
-      teamName: invite.teamName,
-      token: invite.token.trim(),
-    };
-
-    setPendingInvite(nextInvite);
-    await AsyncStorage.setItem(pendingInviteStorageKey, JSON.stringify(nextInvite));
-
-    return nextInvite;
-  }, []);
-
-  const capturePendingInviteFromUrl = useCallback(
-    async (url: string) => {
-      const invite = extractInviteDetails(url);
-
-      if (!invite.token) {
-        return null;
-      }
-
-      return persistPendingInvite(invite);
-    },
-    [persistPendingInvite],
-  );
-
   const routeSignedInUser = useCallback(
     async (options?: { requirePasscode?: boolean }) => {
       try {
         let profile = await getMyProfile();
         const user = await getCurrentUser();
         const hasPasscode = user ? await hasLocalPasscode(user.id) : false;
-        const activePendingInvite = pendingInvite ?? (await loadStoredPendingInvite());
         const preferredRole = user?.id ? await loadPreferredRole(user.id) : null;
-        const nextRole: AccountRole = activePendingInvite
-          ? 'crewmate'
-          : preferredRole ?? profile?.account_role ?? selectedRole ?? 'crewmate';
+        const nextRole: AccountRole =
+          preferredRole ?? profile?.account_role ?? selectedRole ?? 'crewmate';
 
         if (user?.email) {
           setEmailAddress(user.email);
@@ -497,8 +426,8 @@ export default function App() {
 
         if (
           user?.email &&
-          ((activePendingInvite && profile?.account_role !== 'crewmate') ||
-            (!profile?.account_role && preferredRole))
+          !profile?.account_role &&
+          preferredRole
         ) {
           try {
             profile = await saveProfileRole({
@@ -510,14 +439,6 @@ export default function App() {
           }
         }
 
-        // Google has just re-authenticated the user. A pending invite should
-        // continue straight to its join screen instead of being trapped by a
-        // app passcode gate before the invite can be completed.
-        if (activePendingInvite && profile?.onboarding_status === 'complete') {
-          setScreen('join-team');
-          return;
-        }
-
         if (options?.requirePasscode && user && hasPasscode) {
           setUnlockCode('');
           setUnlockError('');
@@ -526,7 +447,7 @@ export default function App() {
         }
 
         if (profile?.onboarding_status === 'complete') {
-          setScreen(activePendingInvite ? 'join-team' : 'home');
+          setScreen('home');
           return;
         }
 
@@ -550,7 +471,7 @@ export default function App() {
             }
           }
 
-          setScreen(activePendingInvite ? 'join-team' : 'home');
+          setScreen('home');
           return;
         }
 
@@ -565,10 +486,10 @@ export default function App() {
           return;
         }
 
-        openAccountIntro('email');
+        openEmailRegistration('login');
       }
     },
-    [authMode, loadStoredPendingInvite, openAccountIntro, pendingInvite, selectedRole],
+    [authMode, openAccountIntro, openEmailRegistration, selectedRole],
   );
 
   const submitEmailForCode = useCallback(async () => {
@@ -764,7 +685,6 @@ export default function App() {
   const logoutCurrentUser = useCallback(async () => {
     try {
       await signOutUser();
-      await AsyncStorage.removeItem(pendingInviteStorageKey);
       initialSessionHandled.current = false;
       setIsSignedIn(false);
       setSignedInUserId('');
@@ -777,7 +697,6 @@ export default function App() {
       setTeamTaskSubmissionsByTeamId({});
       setTeamMembersByTeamId({});
       setMyJoinRequestStatuses([]);
-      setPendingInvite(null);
       setSeenJoinNotificationKeys([]);
       setSeenJoinNotificationsHydratedFor('');
       setSeenSubmissionIds([]);
@@ -851,41 +770,9 @@ export default function App() {
 
       if (hasAuthCallback) {
         await handleOAuthRedirectUrl(url);
-        return;
       }
-
-      const invite = await capturePendingInviteFromUrl(url);
-
-      if (invite) {
-        if (
-          Platform.OS === 'web' &&
-          typeof window !== 'undefined' &&
-          window.location.pathname !== '/'
-        ) {
-          window.history.replaceState({}, '', '/');
-        }
-
-        if (!isSignedIn) {
-          openEmailRegistration('login');
-          return;
-        }
-
-        setSelectedRole('crewmate');
-        if (signedInUserId) {
-          await persistPreferredRole(signedInUserId, 'crewmate');
-        }
-        setScreen('join-team');
-        return;
-      }
-
     },
-    [
-      capturePendingInviteFromUrl,
-      handleOAuthRedirectUrl,
-      isSignedIn,
-      openEmailRegistration,
-      signedInUserId,
-    ],
+    [handleOAuthRedirectUrl],
   );
 
   useEffect(() => {
@@ -918,6 +805,12 @@ export default function App() {
     }, 8000);
 
     const restoreSession = async () => {
+      // Remove invite-link state written by older web builds. Team joining is
+      // now code-only and must never influence authentication or onboarding.
+      await AsyncStorage.removeItem('crewpay.pendingInvite.v1').catch(
+        () => undefined,
+      );
+
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         const params = getAuthCallbackParams(window.location.href);
         const hasAuthCallback =
@@ -939,27 +832,22 @@ export default function App() {
       }
 
       const result = await supabase.auth.getSession();
-      const user = result.data.session?.user;
-      const isAnonymousUser = Boolean(
+      let user = result.data.session?.user;
+      let isAnonymousUser = Boolean(
         (user as { is_anonymous?: boolean } | undefined)?.is_anonymous ||
           user?.app_metadata?.provider === 'anonymous',
       );
-      let restoredPendingInvite = await loadStoredPendingInvite();
 
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const inviteFromUrl = extractInviteDetails(window.location.href);
+      if (user && !isAnonymousUser) {
+        const validation = await supabase.auth.getUser();
 
-        if (inviteFromUrl.token) {
-          restoredPendingInvite = await persistPendingInvite(inviteFromUrl);
-
-          if (window.location.pathname !== '/') {
-            window.history.replaceState({}, '', '/');
-          }
-        } else if (restoredPendingInvite) {
-          setPendingInvite(restoredPendingInvite);
+        if (validation.error || !validation.data.user) {
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+          user = undefined;
+          isAnonymousUser = false;
+        } else {
+          user = validation.data.user;
         }
-      } else if (restoredPendingInvite) {
-        setPendingInvite(restoredPendingInvite);
       }
 
       if (isAnonymousUser) {
@@ -975,13 +863,6 @@ export default function App() {
 
       if (!isAnonymousUser && user?.email) {
         setEmailAddress(user.email);
-      }
-
-      if ((!user || isAnonymousUser) && restoredPendingInvite) {
-        setAuthMode('login');
-        setAuthError('');
-        setEmailStep('entry');
-        setScreen('email');
       }
 
       if (!isAnonymousUser && user && !initialSessionHandled.current) {
@@ -1036,8 +917,6 @@ export default function App() {
     };
   }, [
     handleOAuthRedirectUrl,
-    loadStoredPendingInvite,
-    persistPendingInvite,
     reportSyncError,
     routeSignedInUser,
   ]);
@@ -1538,10 +1417,6 @@ export default function App() {
             email={emailAddress}
             mode={authMode}
             onClose={() => {
-              if (pendingInvite) {
-                void persistPendingInvite(null);
-              }
-
               if (Platform.OS === 'web' && typeof window !== 'undefined') {
                 window.history.replaceState({}, '', '/');
               }
@@ -1639,7 +1514,7 @@ export default function App() {
           <SetupFlow
             email={emailAddress}
             initialStep={setupStartStep}
-            onComplete={() => setScreen(pendingInvite ? 'join-team' : 'home')}
+            onComplete={() => setScreen('home')}
             onExit={() => setScreen('account-intro')}
             role={selectedRole}
           />
@@ -1982,29 +1857,13 @@ export default function App() {
           }}
         >
           <JoinTeamScreen
-            initialInviteValue={pendingInvite?.token}
-            initialTeamName={pendingInvite?.teamName}
             onBack={() => {
-              if (pendingInvite) {
-                void persistPendingInvite(null);
-              }
-
-              if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                window.history.replaceState({}, '', '/');
-              }
-
               setScreen('home');
             }}
             onJoined={async (joinResult) => {
-              await persistPendingInvite(null);
-
               setSelectedRole('crewmate');
               if (signedInUserId) {
                 await persistPreferredRole(signedInUserId, 'crewmate');
-              }
-
-              if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                window.history.replaceState({}, '', '/');
               }
 
               await Promise.allSettled([
@@ -6494,7 +6353,7 @@ function JoinTeamScreen({
                 setErrorMessage('');
                 setJoinResult(null);
               }}
-              placeholder="https://crewpay.online/?invite=... or paste code"
+              placeholder="Enter invite code"
               placeholderTextColor="#aeb1a8"
               style={{
                 borderColor: inviteValue ? palette.greenDeep : '#a3a49f',
@@ -11002,16 +10861,8 @@ function TeamDetailScreen({
         team.id,
         team.joinRule === 'Invite only' ? 'auto_join' : 'request',
       );
-      const baseUrl =
-        typeof window !== 'undefined' && window.location?.origin
-          ? window.location.origin
-          : 'https://crewpay.online';
-      const joinLink = `${baseUrl}/join-team/${encodeURIComponent(
-        invite.token,
-      )}?team=${encodeURIComponent(team.name)}`;
-
       await Share.share({
-        message: `Join ${team.name} on CrewPay.\n\n${joinLink}\n\nInvite code: ${invite.token}`,
+        message: `Join ${team.name} on CrewPay with this invite code:\n\n${invite.token}`,
         title: `Join ${team.name}`,
       });
     } catch (error) {
