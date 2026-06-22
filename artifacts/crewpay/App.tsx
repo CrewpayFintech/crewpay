@@ -6257,7 +6257,7 @@ function JoinTeamScreen({
                 setErrorMessage('');
                 setJoinResult(null);
               }}
-              placeholder="crewpay://join-team/..."
+              placeholder="https://crewpay.online/?invite=... or paste code"
               placeholderTextColor="#aeb1a8"
               style={{
                 borderColor: inviteValue ? palette.greenDeep : '#a3a49f',
