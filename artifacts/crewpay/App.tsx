@@ -507,11 +507,6 @@ export default function App() {
           }
         }
 
-        if (activePendingInvite) {
-          setScreen('home');
-          return;
-        }
-
         if (options?.requirePasscode && user && hasPasscode) {
           setUnlockCode('');
           setUnlockError('');
@@ -520,7 +515,7 @@ export default function App() {
         }
 
         if (profile?.onboarding_status === 'complete') {
-          setScreen('home');
+          setScreen(activePendingInvite ? 'join-team' : 'home');
           return;
         }
 
@@ -544,7 +539,7 @@ export default function App() {
             }
           }
 
-          setScreen('home');
+          setScreen(activePendingInvite ? 'join-team' : 'home');
           return;
         }
 
@@ -662,12 +657,13 @@ export default function App() {
     setAuthError('');
     Keyboard.dismiss();
 
-      try {
-        const { data, error } = await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: authRedirectUrl,
-          skipBrowserRedirect: true,
+    try {
+      const isWeb = Platform.OS === 'web';
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: authRedirectUrl,
+          skipBrowserRedirect: !isWeb,
         },
       });
 
@@ -675,13 +671,12 @@ export default function App() {
         throw error;
       }
 
-      if (!data.url) {
-        throw new Error('Google sign-in could not be started.');
+      if (isWeb) {
+        return;
       }
 
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.location.assign(data.url);
-        return;
+      if (!data.url) {
+        throw new Error('Google sign-in could not be started.');
       }
 
       await Linking.openURL(data.url);
@@ -842,7 +837,7 @@ export default function App() {
         if (signedInUserId) {
           await persistPreferredRole(signedInUserId, 'crewmate');
         }
-        setScreen('home');
+        setScreen('join-team');
         return;
       }
 
@@ -1591,7 +1586,7 @@ export default function App() {
           <SetupFlow
             email={emailAddress}
             initialStep={setupStartStep}
-            onComplete={() => setScreen('home')}
+            onComplete={() => setScreen(pendingInvite ? 'join-team' : 'home')}
             onExit={() => setScreen('account-intro')}
             role={selectedRole}
           />
@@ -1682,35 +1677,6 @@ export default function App() {
             syncStatus={syncStatus}
           />
         </View>
-      ) : null}
-      {screen === 'home' && isSignedIn && pendingInvite ? (
-        <PendingInvitePrompt
-          invite={pendingInvite}
-          onCancel={() => {
-            void persistPendingInvite(null);
-
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-              window.history.replaceState({}, '', '/');
-            }
-          }}
-          onJoin={async () => {
-            const result = await joinTeamWithInvite(pendingInvite.token);
-
-            setSelectedRole('crewmate');
-            if (signedInUserId) {
-              await persistPreferredRole(signedInUserId, 'crewmate');
-            }
-
-            void Promise.allSettled([
-              refreshTeamsFromBackend(),
-              refreshTasksFromBackend(),
-              refreshMyJoinRequestStatuses(),
-              refreshMySubmissionsFromBackend(),
-            ]);
-
-            return result;
-          }}
-        />
       ) : null}
       {screen === 'chat' ? (
         <View
@@ -1938,14 +1904,36 @@ export default function App() {
         >
           <JoinTeamScreen
             initialInviteValue={pendingInvite?.token}
-            onBack={() => setScreen('home')}
+            initialTeamName={pendingInvite?.teamName}
+            onBack={() => {
+              if (pendingInvite) {
+                void persistPendingInvite(null);
+              }
+
+              if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                window.history.replaceState({}, '', '/');
+              }
+
+              setScreen('home');
+            }}
             onJoined={async () => {
               await persistPendingInvite(null);
-              try {
-                await refreshTeamsFromBackend();
-              } catch {
-                // The join action already succeeded; the next app launch will restore teams.
+
+              setSelectedRole('crewmate');
+              if (signedInUserId) {
+                await persistPreferredRole(signedInUserId, 'crewmate');
               }
+
+              if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                window.history.replaceState({}, '', '/');
+              }
+
+              await Promise.allSettled([
+                refreshTeamsFromBackend(),
+                refreshTasksFromBackend(),
+                refreshMyJoinRequestStatuses(),
+                refreshMySubmissionsFromBackend(),
+              ]);
 
               setScreen('home');
             }}
@@ -6049,12 +6037,91 @@ function PendingInvitePrompt({
   );
 }
 
+function JoinTeamSkeleton() {
+  const { width, height } = useWindowDimensions();
+  const widthScale = width / 590;
+  const heightScale = height / 1280;
+  const scale = Math.min(widthScale, heightScale);
+  const x = (value: number) => Math.round(value * widthScale);
+  const y = (value: number) => Math.round(value * heightScale);
+  const s = (value: number) => Math.round(value * scale);
+  const pulse = useRef(new Animated.Value(0.42)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          duration: 520,
+          easing: Easing.inOut(Easing.ease),
+          toValue: 0.82,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          duration: 520,
+          easing: Easing.inOut(Easing.ease),
+          toValue: 0.42,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [pulse]);
+
+  const block = (
+    blockWidth: number | `${number}%`,
+    blockHeight: number,
+    radius = 12,
+  ) => (
+    <Animated.View
+      style={{
+        backgroundColor: '#e9ede5',
+        borderRadius: s(radius),
+        height: y(blockHeight),
+        opacity: pulse,
+        width: blockWidth,
+      }}
+    />
+  );
+
+  return (
+    <View
+      style={{
+        backgroundColor: '#ffffff',
+        flex: 1,
+        paddingHorizontal: x(25),
+        paddingTop: y(88),
+      }}
+    >
+      <StatusBar style="dark" />
+      {block(s(58), 58, 999)}
+      <View style={{ gap: y(13), marginTop: y(62) }}>
+        {block('68%', 42, 10)}
+        {block('88%', 23, 8)}
+      </View>
+      <View style={{ gap: y(10), marginTop: y(54) }}>
+        {block('26%', 20, 7)}
+        {block('100%', 64, 15)}
+        {block('52%', 22, 8)}
+      </View>
+      <View style={{ gap: y(10), marginTop: y(34) }}>
+        {block('35%', 20, 7)}
+        {block('100%', 98, 15)}
+      </View>
+      <View style={{ marginTop: y(42) }}>{block('100%', 66, 999)}</View>
+    </View>
+  );
+}
+
 function JoinTeamScreen({
   initialInviteValue,
+  initialTeamName,
   onBack,
   onJoined,
 }: {
   initialInviteValue?: string;
+  initialTeamName?: string;
   onBack: () => void;
   onJoined: () => void | Promise<void>;
 }) {
@@ -6069,6 +6136,7 @@ function JoinTeamScreen({
   const [message, setMessage] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [showSkeleton, setShowSkeleton] = useState(Boolean(initialInviteValue));
   const [joinResult, setJoinResult] = useState<Awaited<
     ReturnType<typeof joinTeamWithInvite>
   > | null>(null);
@@ -6080,7 +6148,13 @@ function JoinTeamScreen({
       setInviteValue(initialInviteValue);
       setJoinResult(null);
       setErrorMessage('');
+      setShowSkeleton(true);
+
+      const timer = setTimeout(() => setShowSkeleton(false), 560);
+      return () => clearTimeout(timer);
     }
+
+    setShowSkeleton(false);
   }, [initialInviteValue]);
 
   const submitInvite = useCallback(async () => {
@@ -6114,6 +6188,10 @@ function JoinTeamScreen({
       setIsJoining(false);
     }
   }, [canJoin, inviteToken, joinResult, message, onJoined]);
+
+  if (showSkeleton) {
+    return <JoinTeamSkeleton />;
+  }
 
   return (
     <View
@@ -6194,6 +6272,21 @@ function JoinTeamScreen({
               }}
               value={inviteValue}
             />
+            {initialTeamName?.trim() ? (
+              <Text
+                selectable
+                style={{
+                  color: palette.greenDeep,
+                  fontSize: appFontSize(s, 17),
+                  fontWeight: '900',
+                  letterSpacing: -0.18,
+                  lineHeight: s(24),
+                  marginTop: y(11),
+                }}
+              >
+                {initialTeamName.trim()}
+              </Text>
+            ) : null}
           </View>
 
           <View style={{ marginTop: y(24) }}>

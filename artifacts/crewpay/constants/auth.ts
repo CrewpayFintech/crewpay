@@ -16,6 +16,6 @@ const webRedirectUrl =
     : '';
 
 export const authRedirectUrl =
-  process.env?.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim() ||
   webRedirectUrl ||
+  process.env?.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim() ||
   'crewpay://auth/callback';
