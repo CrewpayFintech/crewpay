@@ -2752,8 +2752,8 @@ function EmailRegistrationFlow({
     }).start();
   }, [step, transition]);
 
-  const animatedStyle = {
-    ...(Platform.OS !== 'web' ? { opacity: transition } : {}),
+  const animatedStyle = Platform.OS === 'web' ? {} : {
+    opacity: transition,
     transform: [
       {
         translateX: transition.interpolate({
@@ -3654,8 +3654,8 @@ function SetupFlow({
     }
   }, [bankAccountName, bankAccountNumber, bankCode, bankName, onComplete]);
 
-  const animatedStyle = {
-    ...(Platform.OS !== 'web' ? { opacity: transition } : {}),
+  const animatedStyle = Platform.OS === 'web' ? {} : {
+    opacity: transition,
     transform: [
       {
         translateX: transition.interpolate({
@@ -9667,8 +9667,8 @@ function CreateTaskFlow({
                 ? draft.proofTypes.length > 0
                 : true;
 
-  const animatedStyle = {
-    ...(Platform.OS !== 'web' ? { opacity: transition } : {}),
+  const animatedStyle = Platform.OS === 'web' ? {} : {
+    opacity: transition,
     transform: [
       {
         translateX: transition.interpolate({
@@ -16284,8 +16284,8 @@ function CreateTeamFlow({
     }).start();
   }, [step, transition]);
 
-  const animatedStyle = {
-    ...(Platform.OS !== 'web' ? { opacity: transition } : {}),
+  const animatedStyle = Platform.OS === 'web' ? {} : {
+    opacity: transition,
     transform: [
       {
         translateX: transition.interpolate({
