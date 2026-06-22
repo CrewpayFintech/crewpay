@@ -36,13 +36,6 @@ npm-debug.log
 yarn-error.log
 testem.log
 /typings
-.env
-.env.*
-!.env.example
-.vercel/
-.vercel-*/
-debug-*.png
-expo-web.log
 
 # System Files
 .DS_Store
@@ -54,5 +47,3 @@ Thumbs.db
 # Replit
 .cache/
 .local/
-.vercel
-.env*.local
