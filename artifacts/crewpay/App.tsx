@@ -2748,12 +2748,12 @@ function EmailRegistrationFlow({
       duration: 300,
       easing: Easing.out(Easing.cubic),
       toValue: 1,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [step, transition]);
 
   const animatedStyle = {
-    opacity: transition,
+    ...(Platform.OS !== 'web' ? { opacity: transition } : {}),
     transform: [
       {
         translateX: transition.interpolate({
@@ -3413,7 +3413,7 @@ function SetupFlow({
       duration: 280,
       easing: Easing.out(Easing.cubic),
       toValue: 1,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [step, transition]);
 
@@ -3655,7 +3655,7 @@ function SetupFlow({
   }, [bankAccountName, bankAccountNumber, bankCode, bankName, onComplete]);
 
   const animatedStyle = {
-    opacity: transition,
+    ...(Platform.OS !== 'web' ? { opacity: transition } : {}),
     transform: [
       {
         translateX: transition.interpolate({
@@ -9644,7 +9644,7 @@ function CreateTaskFlow({
       duration: 280,
       easing: Easing.out(Easing.cubic),
       toValue: 1,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [step, transition]);
 
@@ -9668,7 +9668,7 @@ function CreateTaskFlow({
                 : true;
 
   const animatedStyle = {
-    opacity: transition,
+    ...(Platform.OS !== 'web' ? { opacity: transition } : {}),
     transform: [
       {
         translateX: transition.interpolate({
@@ -16280,12 +16280,12 @@ function CreateTeamFlow({
       duration: 280,
       easing: Easing.out(Easing.cubic),
       toValue: 1,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [step, transition]);
 
   const animatedStyle = {
-    opacity: transition,
+    ...(Platform.OS !== 'web' ? { opacity: transition } : {}),
     transform: [
       {
         translateX: transition.interpolate({
