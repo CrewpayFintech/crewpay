@@ -319,6 +319,7 @@ export default function App() {
   const [signedInUserId, setSignedInUserId] = useState('');
   const [unlockCode, setUnlockCode] = useState('');
   const [unlockError, setUnlockError] = useState('');
+  const [unlockShake, setUnlockShake] = useState(0);
   const [accountIntroSource, setAccountIntroSource] =
     useState<AccountIntroSource>('onboarding');
   const [selectedRole, setSelectedRole] = useState<AccountRole>('crewmate');
@@ -765,12 +766,14 @@ export default function App() {
       setPendingJoinRequests([]);
       setUnlockCode('');
       setUnlockError('');
+      setUnlockShake(0);
       setSyncError('');
       setSyncStatus('idle');
       setAuthMode('login');
       setEmailStep('entry');
       setEmailOtpCode('');
       setAuthError('');
+      setOnboardingIndex(0);
       setScreen('email');
     } catch (error) {
       Alert.alert('Could not log out', getErrorMessage(error));
@@ -793,6 +796,7 @@ export default function App() {
       }
 
       setUnlockCode('');
+      setUnlockShake((v) => v + 1);
 
       if (result.lockedUntil) {
         const unlockTime = new Date(result.lockedUntil).toLocaleTimeString([], {
@@ -1585,6 +1589,7 @@ export default function App() {
                 return nextCode;
               });
             }}
+            shakeTrigger={unlockShake}
             value={unlockCode}
           />
         </View>
@@ -2272,6 +2277,16 @@ function CrewPayOnboarding({
   );
 
   goToRef.current = goTo;
+
+  const prevInitialIndex = useRef(initialIndex);
+  useEffect(() => {
+    if (prevInitialIndex.current !== initialIndex) {
+      prevInitialIndex.current = initialIndex;
+      if (initialIndex === 0) {
+        goTo(0);
+      }
+    }
+  }, [initialIndex, goTo]);
 
   useEffect(() => {
     if (activeIndex !== 0) {
@@ -3380,12 +3395,17 @@ function SetupFlow({
     const previousStep = currentSetupSteps[stepIndex - 1];
 
     if (previousStep) {
+      if (step === 'confirmPasscode') {
+        setPasscode('');
+        setConfirmPasscode('');
+        setConfirmPasscodeError('');
+      }
       goToStep(previousStep, -1);
       return;
     }
 
     onExit();
-  }, [currentSetupSteps, goToStep, onExit, stepIndex]);
+  }, [currentSetupSteps, goToStep, onExit, step, stepIndex]);
 
   useEffect(() => {
     transition.setValue(0);
@@ -5703,12 +5723,14 @@ function PasscodeUnlockScreen({
   onBack,
   onDelete,
   onDigit,
+  shakeTrigger = 0,
   value,
 }: {
   error: string;
   onBack: () => void;
   onDelete: () => void;
   onDigit: (digit: string) => void;
+  shakeTrigger?: number;
   value: string;
 }) {
   const { width, height } = useWindowDimensions();
@@ -5718,6 +5740,24 @@ function PasscodeUnlockScreen({
   const x = (input: number) => Math.round(input * widthScale);
   const y = (input: number) => Math.round(input * heightScale);
   const s = (input: number) => Math.round(input * scale);
+  const dotShake = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (shakeTrigger <= 0) {
+      return;
+    }
+
+    Vibration.vibrate(35);
+    dotShake.stopAnimation();
+    dotShake.setValue(0);
+    Animated.sequence([
+      Animated.timing(dotShake, { duration: 45, easing: Easing.out(Easing.cubic), toValue: -8, useNativeDriver: true }),
+      Animated.timing(dotShake, { duration: 45, easing: Easing.out(Easing.cubic), toValue: 8, useNativeDriver: true }),
+      Animated.timing(dotShake, { duration: 45, easing: Easing.out(Easing.cubic), toValue: -6, useNativeDriver: true }),
+      Animated.timing(dotShake, { duration: 45, easing: Easing.out(Easing.cubic), toValue: 6, useNativeDriver: true }),
+      Animated.spring(dotShake, { damping: 11, mass: 0.45, stiffness: 260, toValue: 0, useNativeDriver: true }),
+    ]).start();
+  }, [dotShake, shakeTrigger]);
 
   return (
     <View
@@ -5759,9 +5799,11 @@ function PasscodeUnlockScreen({
       </Text>
       <PasscodeDots
         count={value.length}
+        error={error.length > 0}
         marginTop={y(error ? 66 : 88)}
         s={s}
         scale={scale}
+        shake={dotShake}
       />
       {error ? (
         <Text
