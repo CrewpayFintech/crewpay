@@ -98,6 +98,7 @@ export function ChatScreen({ allowedTeamIds, onBack }: ChatScreenProps) {
   const s = (value: number) => Math.round(value * scale);
   const listRef = useRef<FlatList<ChatMessage>>(null);
 
+  const [chatTab, setChatTab] = useState<'teams' | 'direct'>('teams');
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [targets, setTargets] = useState<ChatTarget[]>([]);
   const [selectedConversation, setSelectedConversation] =
@@ -598,7 +599,7 @@ export function ChatScreen({ allowedTeamIds, onBack }: ChatScreenProps) {
             marginTop: y(54),
           }}
         >
-          <View>
+          <View style={{ flex: 1 }}>
             <Text
               style={{
                 color: palette.ink,
@@ -608,16 +609,6 @@ export function ChatScreen({ allowedTeamIds, onBack }: ChatScreenProps) {
               }}
             >
               Chats
-            </Text>
-            <Text
-              style={{
-                color: '#777a83',
-                fontSize: s(18),
-                fontWeight: '500',
-                marginTop: y(6),
-              }}
-            >
-              Team rooms and direct messages
             </Text>
           </View>
           <Pressable
@@ -641,11 +632,79 @@ export function ChatScreen({ allowedTeamIds, onBack }: ChatScreenProps) {
         </View>
       </View>
 
+      <View
+        style={{
+          borderBottomColor: '#edf0f5',
+          borderBottomWidth: 1,
+          flexDirection: 'row',
+          paddingHorizontal: x(38),
+        }}
+      >
+        {(['teams', 'direct'] as const).map((tab) => {
+          const isActive = chatTab === tab;
+          const label = tab === 'teams' ? 'Team rooms' : 'Direct messages';
+          const count =
+            tab === 'teams'
+              ? teamConversations.length
+              : directConversations.length + freshTargets.length;
+          return (
+            <Pressable
+              key={tab}
+              accessibilityRole="button"
+              onPress={() => setChatTab(tab)}
+              style={{
+                alignItems: 'center',
+                borderBottomColor: isActive ? palette.greenDeep : 'transparent',
+                borderBottomWidth: 2,
+                flexDirection: 'row',
+                gap: x(6),
+                marginRight: x(24),
+                paddingBottom: y(12),
+                paddingTop: y(10),
+              }}
+            >
+              <Text
+                style={{
+                  color: isActive ? palette.greenDeep : '#8a90a3',
+                  fontSize: s(15),
+                  fontWeight: '800',
+                }}
+              >
+                {label}
+              </Text>
+              {count > 0 ? (
+                <View
+                  style={{
+                    alignItems: 'center',
+                    backgroundColor: isActive ? palette.greenDeep : '#d6d9e0',
+                    borderRadius: 999,
+                    height: s(18),
+                    justifyContent: 'center',
+                    minWidth: s(18),
+                    paddingHorizontal: x(4),
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: isActive ? '#ffffff' : '#5a5e68',
+                      fontSize: s(11),
+                      fontWeight: '800',
+                    }}
+                  >
+                    {count}
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </View>
+
       <ScrollView
         contentContainerStyle={{
           paddingBottom: y(58),
           paddingHorizontal: x(38),
-          paddingTop: y(34),
+          paddingTop: y(22),
         }}
         refreshControl={
           <RefreshControl
@@ -665,24 +724,21 @@ export function ChatScreen({ allowedTeamIds, onBack }: ChatScreenProps) {
           <View style={{ paddingTop: y(90) }}>
             <ActivityIndicator color={palette.greenDeep} size="large" />
           </View>
+        ) : chatTab === 'teams' ? (
+          teamConversations.length > 0 ? (
+            teamConversations.map(renderConversationRow)
+          ) : (
+            <EmptyChatCopy
+              body="Create or join a team and the group chat will appear here."
+              s={s}
+              y={y}
+            />
+          )
         ) : (
           <>
-            <SectionHeader label="Team rooms" s={s} y={y} />
-            {teamConversations.length > 0 ? (
-              teamConversations.map(renderConversationRow)
-            ) : (
-              <EmptyChatCopy
-                body="Create or join a team and the group chat will appear here."
-                s={s}
-                y={y}
-              />
-            )}
-
-            <SectionHeader label="Direct messages" s={s} y={y} />
             {directConversations.map(renderConversationRow)}
             {freshTargets.map(renderTargetRow)}
-            {directConversations.length === 0 &&
-            freshTargets.length === 0 ? (
+            {directConversations.length === 0 && freshTargets.length === 0 ? (
               <EmptyChatCopy
                 body="Admins and members you can message will appear here."
                 s={s}
@@ -976,9 +1032,9 @@ export function ChatScreen({ allowedTeamIds, onBack }: ChatScreenProps) {
               fontSize: Math.max(s(18), 16),
               fontWeight: '500',
               lineHeight: Math.max(s(24), 22),
-              minHeight: y(58),
+              minHeight: Math.max(y(58), 48),
               paddingHorizontal: x(22),
-              paddingVertical: y(12),
+              paddingVertical: Math.max(y(12), 10),
             }}
             value={messageText}
           />

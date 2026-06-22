@@ -1,1 +1,2 @@
-- [Expo EXPO_PUBLIC env vars](expo-env-vars.md) — Replit secrets aren't picked up by Metro bundler; must write a .env file first via a pre-start script.
+- [Supabase anon key fix](supabase-anon-key.md) — the stored key was missing the JWT header segment (only 128 chars); full key is ~220 chars (3 dot-separated parts)
+- [authChecked blank screen](auth-checked-blank.md) — blank screen = authChecked stays false; added 8s safety timeout so UI never stays blank indefinitely

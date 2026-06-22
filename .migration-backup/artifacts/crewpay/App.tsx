@@ -875,6 +875,12 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
+    const authCheckTimeout = setTimeout(() => {
+      if (isMounted) {
+        setAuthChecked(true);
+      }
+    }, 8000);
+
     const restoreSession = async () => {
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         const params = getAuthCallbackParams(window.location.href);
@@ -989,6 +995,7 @@ export default function App() {
 
     return () => {
       isMounted = false;
+      clearTimeout(authCheckTimeout);
       subscription.unsubscribe();
     };
   }, [
@@ -6257,7 +6264,7 @@ function JoinTeamScreen({
                 setErrorMessage('');
                 setJoinResult(null);
               }}
-              placeholder="crewpay://join-team/..."
+              placeholder="https://crewpay.online/?invite=... or paste code"
               placeholderTextColor="#aeb1a8"
               style={{
                 borderColor: inviteValue ? palette.greenDeep : '#a3a49f',
@@ -7792,80 +7799,46 @@ function HomeScreen({
         </Text>
       </View>
 
-      <View
-        style={{
-          alignItems: 'flex-end',
-          display: 'none',
-          flexDirection: 'row',
-          left: x(63),
-          position: 'absolute',
-          top: y(193),
-        }}
-      >
-        <Text
-          selectable
+      {!hasTeam ? (
+        <View
           style={{
-            color: '#000000',
-            fontSize: appFontSize(s, 61),
-            fontWeight: '900',
-            letterSpacing: -2.4,
-            lineHeight: s(70),
+            alignItems: 'center',
+            left: x(108),
+            position: 'absolute',
+            right: x(108),
+            top: y(isCrewMate ? 211 : 292),
           }}
         >
-          ₦0
-        </Text>
-        <Text
-          selectable
-          style={{
-            color: '#b9bbbd',
-            fontSize: appFontSize(s, 61),
-            fontWeight: '900',
-            letterSpacing: -2.4,
-            lineHeight: s(70),
-          }}
-        >
-          .00
-        </Text>
-      </View>
-
-      <View
-        style={{
-          alignItems: 'center',
-          left: x(108),
-          position: 'absolute',
-          right: x(108),
-          top: y(isCrewMate ? 211 : 292),
-        }}
-      >
-        <Text
-          selectable
-          style={{
-            color: '#050505',
-            fontSize: appFontSize(s, 22),
-            fontWeight: '900',
-            letterSpacing: -0.25,
-            lineHeight: s(28),
-            textAlign: 'center',
-          }}
-        >
-          {isCrewMate ? 'No active tasks yet' : 'There is nothing here yet'}
-        </Text>
-        <Text
-          selectable
-          style={{
-            color: '#b5b7b9',
-            fontSize: appFontSize(s, 19),
-            fontWeight: '700',
-            lineHeight: s(24),
-            marginTop: y(6),
-            textAlign: 'center',
-          }}
-        >
-          {isCrewMate
-            ? 'Join a team to see assigned tasks and submit proof for approval'
-            : 'Create tasks, build teams, and review work from your CrewPay wallet'}
-        </Text>
-      </View>
+          <Text
+            selectable
+            style={{
+              color: '#050505',
+              fontSize: appFontSize(s, 22),
+              fontWeight: '900',
+              letterSpacing: -0.25,
+              lineHeight: s(28),
+              textAlign: 'center',
+            }}
+          >
+            {isCrewMate ? 'No active tasks yet' : 'Nothing here yet'}
+          </Text>
+          <Text
+            selectable
+            style={{
+              color: '#b5b7b9',
+              fontSize: appFontSize(s, 19),
+              fontWeight: '700',
+              lineHeight: s(24),
+              marginTop: y(6),
+              textAlign: 'center',
+            }}
+          >
+            {isCrewMate
+              ? 'Join a team to see assigned tasks and earn payouts'
+              : 'Create a team, add tasks, and fund your wallet to start paying crew'}
+          </Text>
+        </View>
+      ) : null}
 
       <Pressable
         accessibilityRole="button"
@@ -8126,7 +8099,7 @@ function HomeScreen({
                 marginTop: y(5),
               }}
             >
-              {isCrewMate ? 'Your recent task submissions and team updates.' : 'Payouts, wallet activity, and team messages.'}
+              {isCrewMate ? 'Your team chats and recent activity.' : 'Wallet transactions and team messages.'}
             </Text>
 
             <Pressable
@@ -8154,102 +8127,45 @@ function HomeScreen({
             </Pressable>
 
             {!isCrewMate ? (
-              <>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={onOpenPayoutHistory}
-                  style={({ pressed }) => ({
-                    alignItems: 'center',
-                    backgroundColor: pressed ? '#f0f1ea' : '#f5f6f0',
-                    borderColor: '#e2e4db',
-                    borderRadius: s(18),
-                    borderWidth: 1,
-                    flexDirection: 'row',
-                    gap: x(12),
-                    marginTop: y(12),
-                    paddingHorizontal: x(16),
-                    paddingVertical: y(14),
-                  })}
-                >
-                  <View style={{ alignItems: 'center', backgroundColor: palette.ink, borderRadius: 999, height: s(36), justifyContent: 'center', width: s(36) }}>
-                    <Text style={{ fontSize: s(18) }}>₦</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text selectable style={{ color: palette.ink, fontSize: s(16), fontWeight: '900' }}>Payout history</Text>
-                    <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>All wallet transactions and payout records</Text>
-                  </View>
-                  <ChevronRight color="#a0a59d" size={s(18)} strokeWidth={2.5} />
-                </Pressable>
-
-                {walletTransactions.length > 0 ? (
-                  <View style={{ gap: y(8), marginTop: y(20) }}>
-                    <Text selectable style={{ color: '#a0a59d', fontSize: s(12), fontWeight: '800', letterSpacing: 0.3, textTransform: 'uppercase' }}>
-                      Recent payouts
-                    </Text>
-                    {walletTransactions
-                      .filter((t) => t.direction === 'reserve' || t.direction === 'debit')
-                      .slice(0, 5)
-                      .map((t) => (
-                        <View
-                          key={t.id}
-                          style={{
-                            backgroundColor: '#f8f9f3',
-                            borderColor: '#eceee7',
-                            borderRadius: s(14),
-                            borderWidth: 1,
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            paddingHorizontal: x(14),
-                            paddingVertical: y(12),
-                          }}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text selectable style={{ color: palette.ink, fontSize: s(14), fontWeight: '800' }}>{t.title}</Text>
-                            <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>{t.subtitle}</Text>
-                          </View>
-                          <Text selectable style={{ color: '#e05252', fontSize: s(14), fontWeight: '900' }}>
-                            -{'\u20a6'}{Number(t.amountNaira || 0).toLocaleString()}
-                          </Text>
-                        </View>
-                      ))}
-                  </View>
-                ) : walletLoading ? (
-                  <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
-                    <ActivityIndicator color={palette.greenDeep} />
-                  </View>
-                ) : (
-                  <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
-                    <Text selectable style={{ color: '#a0a59d', fontSize: s(14), fontWeight: '600', textAlign: 'center' }}>No payouts yet. Process your first bulk transfer.</Text>
-                  </View>
-                )}
-              </>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                onPress={onOpenSubmissions}
-                style={({ pressed }) => ({
-                  alignItems: 'center',
-                  backgroundColor: pressed ? '#f0f1ea' : '#f5f6f0',
-                  borderColor: '#e2e4db',
-                  borderRadius: s(18),
-                  borderWidth: 1,
-                  flexDirection: 'row',
-                  gap: x(12),
-                  marginTop: y(12),
-                  paddingHorizontal: x(16),
-                  paddingVertical: y(14),
-                })}
-              >
-                <View style={{ alignItems: 'center', backgroundColor: palette.green, borderRadius: 999, height: s(36), justifyContent: 'center', width: s(36) }}>
-                  <Text style={{ fontSize: s(18) }}>📋</Text>
+              walletTransactions.length > 0 ? (
+                <View style={{ gap: y(8), marginTop: y(20) }}>
+                  <Text selectable style={{ color: '#a0a59d', fontSize: s(12), fontWeight: '800', letterSpacing: 0.3, textTransform: 'uppercase' }}>
+                    Recent transactions
+                  </Text>
+                  {walletTransactions.slice(0, 6).map((t) => (
+                    <View
+                      key={t.id}
+                      style={{
+                        backgroundColor: '#f8f9f3',
+                        borderColor: '#eceee7',
+                        borderRadius: s(14),
+                        borderWidth: 1,
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        paddingHorizontal: x(14),
+                        paddingVertical: y(12),
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text selectable style={{ color: palette.ink, fontSize: s(14), fontWeight: '800' }}>{t.title}</Text>
+                        <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>{t.subtitle}</Text>
+                      </View>
+                      <Text selectable style={{ color: t.direction === 'credit' ? '#1c7a3d' : '#e05252', fontSize: s(14), fontWeight: '900' }}>
+                        {t.direction === 'credit' ? '+' : '-'}{'\u20a6'}{Number(t.amountNaira || 0).toLocaleString()}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text selectable style={{ color: palette.ink, fontSize: s(16), fontWeight: '900' }}>My submissions</Text>
-                  <Text selectable style={{ color: '#747a70', fontSize: s(12), fontWeight: '500', marginTop: 2 }}>View your submitted work and approval status</Text>
+              ) : walletLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
+                  <ActivityIndicator color={palette.greenDeep} />
                 </View>
-                <ChevronRight color="#a0a59d" size={s(18)} strokeWidth={2.5} />
-              </Pressable>
-            )}
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: y(32) }}>
+                  <Text selectable style={{ color: '#a0a59d', fontSize: s(14), fontWeight: '600', textAlign: 'center' }}>No transactions yet. Add money and start paying your crew.</Text>
+                </View>
+              )
+            ) : null}
           </ScrollView>
         </View>
       ) : null}
@@ -8975,14 +8891,6 @@ function HomeSettingsPanel({
           onPress={onSwitchRole}
           s={s}
           title={`Use ${isCrewMate ? 'CrewLead' : 'CrewMate'} mode`}
-          x={x}
-          y={y}
-        />
-        <SettingsRow
-          description="Your 4-digit passcode protects returning sessions on this phone."
-          icon={<Settings color="#050505" size={s(22)} strokeWidth={2.8} />}
-          s={s}
-          title="Passcode enabled"
           x={x}
           y={y}
         />
@@ -10722,13 +10630,6 @@ function TeamDetailScreen({
   const activeTaskCount = tasks.filter((task) => task.status === 'published').length;
   const isCrewMate = role === 'crewmate';
   const memberCount = Math.max(members.length, 1);
-  const ownerMembers = members.filter((member) => member.member_role === 'owner');
-  const adminAndWorkerMembers = members.filter(
-    (member) => member.member_role !== 'owner',
-  );
-  const featuredMembers = isCrewMate
-    ? [...ownerMembers.slice(0, 1), ...adminAndWorkerMembers.slice(0, 1)]
-    : ownerMembers.slice(0, 1);
   const pendingReviewCount = teamSubmissions.filter(
     (submission) => submission.status === 'submitted',
   ).length;
@@ -11222,16 +11123,16 @@ function TeamDetailScreen({
           </View>
 
           <TeamDetailSection
-            action={isCrewMate ? undefined : 'Invite member'}
-            icon={<UserPlus color="#11130f" size={s(19)} strokeWidth={2.4} />}
+            action={isCrewMate ? undefined : 'Invite'}
+            icon={<Users color="#11130f" size={s(19)} strokeWidth={2.4} />}
             onAction={isCrewMate ? undefined : shareTeam}
             s={s}
-            title="Members"
+            title={`Team members (${memberCount})`}
             y={y}
           >
-            {featuredMembers.length > 0 ? (
+            {members.length > 0 ? (
               <View style={{ gap: y(10), marginTop: y(16) }}>
-                {featuredMembers.map((member) => (
+                {members.map((member) => (
                   <TeamMemberPill
                     key={member.member_id}
                     member={member}
@@ -11244,69 +11145,12 @@ function TeamDetailScreen({
               </View>
             ) : (
               <TeamDetailEmptyLine
-                body="Members are syncing. Open this team again in a moment."
+                body={isCrewMate ? 'Your team members are still syncing.' : 'Members will appear here once they join or are approved.'}
                 s={s}
-                title={isCrewMate ? 'Your team access is syncing' : 'Owner is syncing'}
+                title={isCrewMate ? 'Team is loading' : 'No members yet'}
                 y={y}
               />
             )}
-            <View
-              style={{
-                alignItems: 'center',
-                display: 'none',
-                flexDirection: 'row',
-                paddingTop: y(18),
-              }}
-            >
-              <TeamAvatar initials="ME" s={s} size={48} />
-              <View style={{ flex: 1, marginLeft: x(13) }}>
-                <Text
-                  selectable
-                  style={{
-                    color: '#11130f',
-                    fontSize: appFontSize(s, 17),
-                    fontWeight: '800',
-                    letterSpacing: -0.2,
-                    lineHeight: s(23),
-                  }}
-                >
-                  You
-                </Text>
-                <Text
-                  selectable
-                  style={{
-                    color: '#8c9188',
-                    fontSize: appFontSize(s, 14),
-                    fontWeight: '500',
-                    lineHeight: s(20),
-                    marginTop: y(1),
-                  }}
-                >
-                  Owner • Ready for approvals
-                </Text>
-              </View>
-              <View
-                style={{
-                  backgroundColor: '#f0f1eb',
-                  borderRadius: 999,
-                  paddingHorizontal: x(12),
-                  paddingVertical: y(6),
-                }}
-              >
-                <Text
-                  selectable
-                  style={{
-                    color: '#11130f',
-                    fontSize: appFontSize(s, 12),
-                    fontWeight: '800',
-                    letterSpacing: 0.2,
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  Admin
-                </Text>
-              </View>
-            </View>
           </TeamDetailSection>
 
           {isCrewMate ? (
@@ -11491,50 +11335,6 @@ function TeamDetailScreen({
             </>
           )}
 
-          <TeamDetailSection
-            icon={<Users color="#11130f" size={s(19)} strokeWidth={2.4} />}
-            s={s}
-            title="Recent activity"
-            y={y}
-          >
-            <TeamDetailEmptyLine
-              body="Invites, task updates, approvals, and payouts will show here."
-              s={s}
-              title="Nothing has happened yet"
-              y={y}
-            />
-          </TeamDetailSection>
-
-          {!isCrewMate ? (
-            <TeamDetailSection
-              icon={<Users color="#11130f" size={s(19)} strokeWidth={2.4} />}
-              s={s}
-              title="Admins and members"
-              y={y}
-            >
-              {adminAndWorkerMembers.length > 0 ? (
-                <View style={{ gap: y(10), marginTop: y(16) }}>
-                  {adminAndWorkerMembers.map((member) => (
-                    <TeamMemberPill
-                      key={member.member_id}
-                      member={member}
-                      onPress={() => openMemberActions(member)}
-                      s={s}
-                      x={x}
-                      y={y}
-                    />
-                  ))}
-                </View>
-              ) : (
-                <TeamDetailEmptyLine
-                  body="Approved crewmates and assigned admins will be listed here."
-                  s={s}
-                  title="No extra members yet"
-                  y={y}
-                />
-              )}
-            </TeamDetailSection>
-          ) : null}
         </View>
       </Animated.ScrollView>
       <SubmissionReviewSheet
@@ -14157,7 +13957,22 @@ function ViewTasksScreen({
       .map((team) => [team.id, team.name]),
   );
   const [selectedTask, setSelectedTask] = useState<TaskWithTeams | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'submitted' | 'approved' | 'rejected'>('all');
   const isCrewMate = role === 'crewmate';
+  const filteredTasks = statusFilter === 'all'
+    ? tasks
+    : tasks.filter((task) => {
+        if (isCrewMate) {
+          const sub = mySubmissions.find((ms) => ms.task_id === task.id);
+          const subStatus = sub?.status ?? 'none';
+          if (statusFilter === 'pending') return !sub || subStatus === 'none';
+          if (statusFilter === 'submitted') return subStatus === 'submitted';
+          if (statusFilter === 'approved') return subStatus === 'approved' || subStatus === 'paid';
+          if (statusFilter === 'rejected') return subStatus === 'rejected';
+          return true;
+        }
+        return task.status === statusFilter;
+      });
 
   if (selectedTask) {
     const assignedTeam = selectedTask.task_team_assignments
@@ -14302,11 +14117,47 @@ function ViewTasksScreen({
           ) : null}
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={{ gap: y(12), paddingBottom: y(80), paddingTop: y(34) }}
-          showsVerticalScrollIndicator={false}
-        >
-          {tasks.map((task) => {
+        <View style={{ flex: 1 }}>
+          <ScrollView
+            contentContainerStyle={{ flexDirection: 'row', gap: x(8), paddingBottom: y(8), paddingTop: y(20) }}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+          >
+            {(['all', 'pending', 'submitted', 'approved', 'rejected'] as const).map((f) => {
+              const isActive = statusFilter === f;
+              const filterLabel = f === 'all' ? 'All' : f === 'pending' ? 'Pending' : f === 'submitted' ? 'In Review' : f === 'approved' ? 'Approved' : 'Rejected';
+              return (
+                <Pressable
+                  key={f}
+                  accessibilityRole="button"
+                  onPress={() => setStatusFilter(f)}
+                  style={({ pressed }) => ({
+                    backgroundColor: isActive ? palette.ink : '#f2f3ef',
+                    borderRadius: 999,
+                    opacity: pressed ? 0.75 : 1,
+                    paddingHorizontal: x(18),
+                    paddingVertical: y(8),
+                  })}
+                >
+                  <Text style={{ color: isActive ? '#ffffff' : '#747a70', fontSize: appFontSize(s, 14), fontWeight: '800' }}>
+                    {filterLabel}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          {filteredTasks.length === 0 ? (
+            <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center', paddingBottom: y(90) }}>
+              <Text style={{ color: 'rgba(5,5,5,0.45)', fontSize: appFontSize(s, 17), fontWeight: '600', textAlign: 'center' }}>
+                No {statusFilter === 'all' ? '' : statusFilter === 'submitted' ? 'in-review' : statusFilter + ' '}tasks
+              </Text>
+            </View>
+          ) : (
+          <ScrollView
+            contentContainerStyle={{ gap: y(12), paddingBottom: y(80), paddingTop: y(16) }}
+            showsVerticalScrollIndicator={false}
+          >
+          {filteredTasks.map((task) => {
             const assignedTeamNames =
               task.task_team_assignments
                 ?.map((assignment) => teamNameById.get(assignment.team_id))
@@ -14391,13 +14242,36 @@ function ViewTasksScreen({
                     marginTop: y(13),
                   }}
                 >
-                  ₦{Number(task.payout_amount_naira || 0).toLocaleString()} •{' '}
-                  {task.people_needed} people • {task.status}
+                  ₦{Number(task.payout_amount_naira || 0).toLocaleString()} • {task.people_needed} {task.people_needed === 1 ? 'person' : 'people'}
                 </Text>
+                {(() => {
+                  const st = isCrewMate
+                    ? (mySubmissions.find((ms) => ms.task_id === task.id)?.status ?? 'unsubmitted')
+                    : task.status;
+                  const statusColors: Record<string, { bg: string; text: string }> = {
+                    unsubmitted: { bg: '#f2f3ef', text: '#747a70' },
+                    pending: { bg: '#fff7e0', text: '#8a6400' },
+                    submitted: { bg: '#e8f0fe', text: '#1a56db' },
+                    approved: { bg: '#e8f5e9', text: '#1c7a3d' },
+                    paid: { bg: '#e8f5e9', text: '#1c7a3d' },
+                    rejected: { bg: '#fde8e8', text: '#c0392b' },
+                    done: { bg: '#e8f5e9', text: '#1c7a3d' },
+                  };
+                  const c = statusColors[st] ?? { bg: '#f2f3ef', text: '#747a70' };
+                  return (
+                    <View style={{ backgroundColor: c.bg, borderRadius: 999, marginTop: y(8), paddingHorizontal: x(10), paddingVertical: y(3), alignSelf: 'flex-start' }}>
+                      <Text style={{ color: c.text, fontSize: appFontSize(s, 12), fontWeight: '800', textTransform: 'capitalize' }}>
+                        {st.replace(/_/g, ' ')}
+                      </Text>
+                    </View>
+                  );
+                })()}
               </Pressable>
             );
           })}
-        </ScrollView>
+          </ScrollView>
+          )}
+        </View>
       )}
     </View>
   );
