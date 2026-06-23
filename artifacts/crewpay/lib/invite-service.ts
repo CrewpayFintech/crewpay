@@ -51,7 +51,7 @@ export async function joinTeamWithInvite(
 
   const result = await supabase.rpc('join_team_with_invite', {
     p_message: message ?? null,
-    p_token: token.trim(),
+    p_token: token.trim().toLowerCase(),
   });
 
   if (result.error) {

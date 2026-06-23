@@ -1332,6 +1332,58 @@ export default function App() {
   }, [refreshVisibleData, screen]);
 
   useEffect(() => {
+    if (!authChecked || !isSignedIn || screen !== 'home') {
+      return undefined;
+    }
+
+    const refreshJoinNotifications = () => {
+      if (selectedRole === 'crewlead') {
+        void Promise.allSettled([
+          refreshJoinRequests(),
+          refreshAppNotifications(),
+        ]);
+        return;
+      }
+
+      void Promise.allSettled([
+        refreshMyJoinRequestStatuses(),
+        refreshAppNotifications(),
+      ]);
+    };
+    const interval = setInterval(refreshJoinNotifications, 8000);
+    const appStateSubscription =
+      Platform.OS === 'web'
+        ? null
+        : AppState.addEventListener('change', (state) => {
+            if (state === 'active') {
+              refreshJoinNotifications();
+            }
+          });
+    const handleWindowFocus = () => refreshJoinNotifications();
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.addEventListener('focus', handleWindowFocus);
+    }
+
+    return () => {
+      clearInterval(interval);
+      appStateSubscription?.remove();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleWindowFocus);
+      }
+    };
+  }, [
+    authChecked,
+    isSignedIn,
+    refreshAppNotifications,
+    refreshJoinRequests,
+    refreshMyJoinRequestStatuses,
+    screen,
+    selectedRole,
+  ]);
+
+  useEffect(() => {
     if (screen !== 'notifications' || myJoinRequestStatuses.length === 0) {
       return;
     }
@@ -6279,10 +6331,15 @@ function JoinTeamScreen({
       setJoinResult(result);
       await onJoined(result);
     } catch (error) {
-      setErrorMessage(
+      const message =
         error instanceof Error
           ? error.message
-          : 'Please check the invite code and try again.',
+          : 'Please check the invite code and try again.';
+
+      setErrorMessage(
+        /invite link is invalid or expired/i.test(message)
+          ? 'Invite code is invalid or expired. Ask your CrewLead for a new code.'
+          : message,
       );
     } finally {
       if (timeoutId) {
@@ -6337,7 +6394,8 @@ function JoinTeamScreen({
               marginTop: y(12),
             }}
           >
-            Paste the invite code or CrewPay link your CrewLead sent you.
+            Paste the invite code or the complete invite message your CrewLead
+            sent you. CrewPay will find the code automatically.
           </Text>
 
           <View style={{ marginTop: y(42) }}>

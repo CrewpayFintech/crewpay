@@ -32,7 +32,34 @@ export function getTasksForTeam(tasks: TaskWithTeams[], teamId?: string) {
 }
 
 export function extractInviteToken(value: string) {
-  return value.trim().replace(/\s+/g, '');
+  const normalized = value
+    .trim()
+    .replace(/%0A/gi, '\n')
+    .replace(/[\u2018\u2019\u201c\u201d]/g, '');
+
+  if (!normalized) {
+    return '';
+  }
+
+  const labelledCode = normalized.match(
+    /invite\s+code\s*[:\-]?\s*([a-z0-9_-]{8,128})/i,
+  )?.[1];
+  const generatedHexCode = normalized.match(
+    /(?:^|[^a-f0-9])([a-f0-9]{36})(?=$|[^a-f0-9])/i,
+  )?.[1];
+  const queryCode = normalized.match(
+    /[?&#](?:code|invite|token)=([a-z0-9_-]{8,128})/i,
+  )?.[1];
+  const standaloneCode = normalized.match(
+    /(?:^|\s)([a-z0-9_-]{8,128})(?=\s|$)/i,
+  )?.[1];
+  const token = labelledCode ?? generatedHexCode ?? queryCode ?? standaloneCode;
+
+  if (token) {
+    return token.replace(/[.,;:!?]+$/, '').toLowerCase();
+  }
+
+  return normalized.replace(/\s+/g, '').toLowerCase();
 }
 
 export function formatRequestTime(value: string) {
